@@ -1,0 +1,8 @@
+[18-09-2026 18:59:08] ERROR: Error general en main - Detalle: No line found
+[18-09-2026 18:59:08] ERROR: Error general en main - Detalle: No line found
+[18-09-2026 18:59:08] ERROR: Error general en main - Detalle: No line found
+[18-09-2026 18:59:08] ERROR: Error general en main - Detalle: No line found
+[18-09-2026 18:59:08] ERROR: Error general en main - Detalle: No line found
+[18-09-2026 18:59:08] ERROR: Error general en main - Detalle: No line found
+[18-09-2026 18:59:08] ERROR: Error general en main - Detalle: No line found
+[18-09-2026 18:59:08] ERROR: Error general en main - Detalle: No line found
