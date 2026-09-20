@@ -4,14 +4,16 @@ import java.util.Scanner
 
 fun menuReportes(
     scanner: Scanner,
-    gestorClientes: GestorClientes
+    gestorClientes: GestorClientes,
+    gestorSuscripciones: GestorSuscripciones
 ) {
+
     var salir = false
 
     while (!salir) {
 
         println("\n======================================")
-        println("       REPORTES WASHIFY")
+        println("           REPORTES WASHIFY")
         println("======================================")
         println("1. Ver historial de lavados")
         println("2. Ver resumen general del sistema")
@@ -27,43 +29,57 @@ fun menuReportes(
             when (scanner.nextLine().toInt()) {
 
                 1 -> {
+
                     println(
                         ">> Historial de lavados aún no disponible."
                     )
                 }
 
                 2 -> {
-                    mostrarResumenGeneral(gestorClientes)
+
+                    mostrarResumenGeneral(
+                        gestorClientes,
+                        gestorSuscripciones
+                    )
                 }
 
                 3 -> {
-                    println(
-                        ">> Suscripciones activas aún no disponibles."
+
+                    mostrarSuscripcionesActivas(
+                        gestorSuscripciones
                     )
                 }
 
                 4 -> {
-                    println(
-                        ">> Suscripciones vencidas aún no disponibles."
+
+                    mostrarSuscripcionesVencidas(
+                        gestorSuscripciones
                     )
                 }
 
                 5 -> {
+
                     println(
                         ">> Servicios realizados aún no disponibles."
                     )
                 }
 
                 6 -> {
-                    NotificacionService.mostrarNotificaciones()
+
+                    NotificacionService
+                        .mostrarNotificaciones()
                 }
 
                 7 -> {
+
                     salir = true
                 }
 
                 else -> {
-                    println("❌ Opción no válida.")
+
+                    println(
+                        "❌ Opción no válida."
+                    )
                 }
             }
 
@@ -77,10 +93,25 @@ fun menuReportes(
 }
 
 fun mostrarResumenGeneral(
-    gestorClientes: GestorClientes
+    gestorClientes: GestorClientes,
+    gestorSuscripciones: GestorSuscripciones
 ) {
 
-    val clientes = gestorClientes.obtenerClientes()
+    val clientes =
+        gestorClientes.obtenerClientes()
+
+    val suscripciones =
+        gestorSuscripciones.obtenerTodas()
+
+    val suscripcionesActivas =
+        suscripciones.count {
+            it.estado == EstadoSuscripcion.ACTIVA
+        }
+
+    val suscripcionesVencidas =
+        suscripciones.count {
+            it.estado == EstadoSuscripcion.VENCIDA
+        }
 
     println("\n======================================")
     println("       RESUMEN GENERAL WASHIFY")
@@ -90,21 +121,111 @@ fun mostrarResumenGeneral(
         "Clientes registrados: ${clientes.size}"
     )
 
+    println(
+        "Suscripciones registradas: ${suscripciones.size}"
+    )
+
+    println(
+        "Suscripciones activas: $suscripcionesActivas"
+    )
+
+    println(
+        "Suscripciones vencidas: $suscripcionesVencidas"
+    )
+
     if (clientes.isEmpty()) {
 
         println(
-            "No hay clientes registrados actualmente."
+            "\nNo hay clientes registrados actualmente."
         )
 
     } else {
 
-        println("\nClientes en el sistema:")
+        println(
+            "\nClientes en el sistema:"
+        )
 
         clientes.forEach { cliente ->
 
             println(
                 "• ${cliente.nombre} | ${cliente.correo}"
             )
+        }
+    }
+
+    println("======================================")
+}
+
+fun mostrarSuscripcionesActivas(
+    gestorSuscripciones: GestorSuscripciones
+) {
+
+    val activas =
+        gestorSuscripciones
+            .obtenerTodas()
+            .filter {
+                it.estado == EstadoSuscripcion.ACTIVA
+            }
+
+    println("\n======================================")
+    println("       SUSCRIPCIONES ACTIVAS")
+    println("======================================")
+
+    if (activas.isEmpty()) {
+
+        println(
+            "No hay suscripciones activas."
+        )
+
+    } else {
+
+        println(
+            "Total de suscripciones activas: ${activas.size}"
+        )
+
+        println()
+
+        activas.forEach { suscripcion ->
+
+            println(suscripcion)
+        }
+    }
+
+    println("======================================")
+}
+
+fun mostrarSuscripcionesVencidas(
+    gestorSuscripciones: GestorSuscripciones
+) {
+
+    val vencidas =
+        gestorSuscripciones
+            .obtenerTodas()
+            .filter {
+                it.estado == EstadoSuscripcion.VENCIDA
+            }
+
+    println("\n======================================")
+    println("       SUSCRIPCIONES VENCIDAS")
+    println("======================================")
+
+    if (vencidas.isEmpty()) {
+
+        println(
+            "No hay suscripciones vencidas."
+        )
+
+    } else {
+
+        println(
+            "Total de suscripciones vencidas: ${vencidas.size}"
+        )
+
+        println()
+
+        vencidas.forEach { suscripcion ->
+
+            println(suscripcion)
         }
     }
 

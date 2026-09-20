@@ -1,8 +1,10 @@
 import com.example.consola.GestorClientes
 import com.example.consola.GestorVehiculos
+import com.example.consola.GestorSuscripciones
 import com.example.consola.PlanBasico
 import com.example.consola.PlanPremium
 import com.example.consola.menuReportes
+import com.example.consola.menuSuscripciones
 import java.io.File
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
@@ -285,7 +287,25 @@ fun main() {
     val scanner = Scanner(System.`in`)
 
     val gestorClientes = GestorClientes()
+
     val gestorVehiculos = GestorVehiculos()
+
+    val gestorSuscripciones = GestorSuscripciones(
+
+        buscarCliente = { id ->
+
+            gestorClientes
+                .obtenerClientes()
+                .find { cliente ->
+                    cliente.id == id
+                }
+        },
+
+        buscarVehiculo = { id ->
+
+            gestorVehiculos.buscarVehiculo(id)
+        }
+    )
 
     var salir = false
 
@@ -296,21 +316,27 @@ fun main() {
     while (!salir) {
 
         println("\n--- MENÚ PRINCIPAL ---")
+
         println(
             "1. Módulo de Clientes y Base (Roger Ramirez)"
         )
+
         println(
             "2. Gestión de Vehículos y Planes (Rodolfo Herrera)"
         )
+
         println(
-            "3. Gestión de Suscripciones (Integrante 3)"
+            "3. Gestión de Suscripciones (Gabriela Avendaño)"
         )
+
         println(
             "4. Registrar Lavado y Validaciones (Integrante 4)"
         )
+
         println(
-            "5. Reportes y Resumen del Sistema (Integrante 5)"
+            "5. Reportes y Resumen del Sistema (Eliseo Garay)"
         )
+
         println("6. Salir")
 
         print("Seleccione un módulo para ingresar: ")
@@ -320,6 +346,7 @@ fun main() {
             when (scanner.nextLine().toInt()) {
 
                 1 -> {
+
                     menuClientes(
                         scanner,
                         gestorClientes
@@ -327,6 +354,7 @@ fun main() {
                 }
 
                 2 -> {
+
                     menuVehiculos(
                         scanner,
                         gestorVehiculos
@@ -334,21 +362,26 @@ fun main() {
                 }
 
                 3 -> {
-                    println(
-                        ">> Entrando al Módulo de Suscripciones..."
+
+                    menuSuscripciones(
+                        scanner,
+                        gestorSuscripciones
                     )
                 }
 
                 4 -> {
+
                     println(
                         ">> Entrando al Registro de Lavados..."
                     )
                 }
 
                 5 -> {
+
                     menuReportes(
                         scanner,
-                        gestorClientes
+                        gestorClientes,
+                        gestorSuscripciones
                     )
                 }
 
