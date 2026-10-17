@@ -120,4 +120,5 @@ class GestorVehiculos {
     fun obtenerVehiculosPorCliente(clienteId: Int): List<Vehiculo> {
         return listaVehiculos.filter { it.clienteId == clienteId }
     }
+    fun obtenerTodos(): List<Vehiculo> = listaVehiculos.toList()
 }
