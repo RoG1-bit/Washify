@@ -133,6 +133,19 @@ fun obtenerActivaDeVehiculo(idVehiculo: Int): Suscripcion? {
 
     fun tieneSuscripcionActiva(idVehiculo: Int): Boolean = obtenerActivaDeVehiculo(idVehiculo) != null
 
+    fun eliminarSuscripcion(id: Int): Boolean {
+        val sub = listaSuscripciones.find { it.id == id } ?: return false
+        sub.vehiculo.plan = null
+        return listaSuscripciones.remove(sub)
+    }
+
+    fun cancelarSuscripcion(id: Int): Boolean {
+        val sub = listaSuscripciones.find { it.id == id } ?: return false
+        sub.estado = EstadoSuscripcion.VENCIDA
+        sub.vehiculo.plan = null
+        return true
+    }
+
     /** Para Integrante 5 (reportes): copia de solo lectura de todas las suscripciones. */
     fun obtenerTodas(): List<Suscripcion> {
         actualizarEstados()

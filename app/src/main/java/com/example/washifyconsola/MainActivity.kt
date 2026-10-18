@@ -31,6 +31,13 @@ import com.example.consola.GestorClientes
 import androidx.compose.runtime.mutableStateListOf
 import com.example.consola.GestorVehiculos
 import com.example.consola.Vehiculo
+import com.example.consola.PlanBasico
+import com.example.consola.PlanPremium
+import com.example.consola.Plan
+import com.example.consola.GestorSuscripciones
+import com.example.consola.Suscripcion
+import com.example.consola.EstadoSuscripcion
+import java.time.format.DateTimeFormatter
 
 private enum class Rol {
     CLIENTE,
@@ -50,7 +57,10 @@ private enum class Pantalla {
     INICIO_CLIENTE,
     INICIO_ADMIN,
     CLIENTES,
-    VEHICULOS
+    VEHICULOS,
+    PLANES,
+    SUSCRIPCIONES,
+    HISTORIAL
 }
 
 class MainActivity : ComponentActivity() {
@@ -83,6 +93,13 @@ fun WashifyApp() {
     val gestorClientes = remember { GestorClientes() }
     val gestorVehiculos = remember { GestorVehiculos() }
     val clientes = remember { mutableStateListOf<Cliente>() }
+    
+    val gestorSuscripciones = remember { 
+        GestorSuscripciones(
+            buscarCliente = { id -> gestorClientes.obtenerClientes().find { it.id == id } },
+            buscarVehiculo = { id -> gestorVehiculos.obtenerTodos().find { it.id == id } }
+        )
+    }
 
     // Cuenta administrativa temporal para pruebas.
     val cuentas = remember {
@@ -310,21 +327,24 @@ fun WashifyApp() {
                     "Planes",
                     "Consultar planes de lavado"
                 ) {
-                    mensaje = "El módulo de planes está pendiente."
+                    mensaje = ""
+                    pantalla = Pantalla.PLANES
                 }
 
                 TarjetaMenu(
                     "Mis suscripciones",
                     "Consultar tu plan y vigencia"
                 ) {
-                    mensaje = "El módulo de suscripciones está pendiente."
+                    mensaje = ""
+                    pantalla = Pantalla.SUSCRIPCIONES
                 }
 
                 TarjetaMenu(
                     "Mi historial",
                     "Consultar tus lavados"
                 ) {
-                    mensaje = "El historial está pendiente."
+                    mensaje = ""
+                    pantalla = Pantalla.HISTORIAL
                 }
 
                 if (mensaje.isNotBlank()) {
@@ -380,21 +400,24 @@ fun WashifyApp() {
                     "Planes",
                     "Gestionar planes de lavado"
                 ) {
-                    mensaje = "El módulo de planes está pendiente."
+                    mensaje = ""
+                    pantalla = Pantalla.PLANES
                 }
 
                 TarjetaMenu(
                     "Suscripciones",
                     "Gestionar suscripciones"
                 ) {
-                    mensaje = "El módulo de suscripciones está pendiente."
+                    mensaje = ""
+                    pantalla = Pantalla.SUSCRIPCIONES
                 }
 
                 TarjetaMenu(
                     "Historial",
                     "Consultar lavados"
                 ) {
-                    mensaje = "El historial está pendiente."
+                    mensaje = ""
+                    pantalla = Pantalla.HISTORIAL
                 }
 
                 if (mensaje.isNotBlank()) {
@@ -437,6 +460,55 @@ fun WashifyApp() {
                 clienteId = clienteIdActual,
                 esAdministrador = rolActual == Rol.ADMINISTRADOR,
                 clientes = gestorClientes.obtenerClientes(),
+                onVolver = {
+                    mensaje = ""
+                    pantalla = if (rolActual == Rol.ADMINISTRADOR) {
+                        Pantalla.INICIO_ADMIN
+                    } else {
+                        Pantalla.INICIO_CLIENTE
+                    }
+                }
+            )
+        }
+        
+        Pantalla.PLANES -> {
+            PantallaPlanes(
+                esAdministrador = rolActual == Rol.ADMINISTRADOR,
+                onVolver = {
+                    mensaje = ""
+                    pantalla = if (rolActual == Rol.ADMINISTRADOR) {
+                        Pantalla.INICIO_ADMIN
+                    } else {
+                        Pantalla.INICIO_CLIENTE
+                    }
+                }
+            )
+        }
+        
+        Pantalla.SUSCRIPCIONES -> {
+            PantallaSuscripciones(
+                gestorSuscripciones = gestorSuscripciones,
+                gestorVehiculos = gestorVehiculos,
+                gestorClientes = gestorClientes,
+                clienteId = clienteIdActual,
+                esAdministrador = rolActual == Rol.ADMINISTRADOR,
+                onVolver = {
+                    mensaje = ""
+                    pantalla = if (rolActual == Rol.ADMINISTRADOR) {
+                        Pantalla.INICIO_ADMIN
+                    } else {
+                        Pantalla.INICIO_CLIENTE
+                    }
+                }
+            )
+        }
+        
+        Pantalla.HISTORIAL -> {
+            PantallaHistorial(
+                gestorSuscripciones = gestorSuscripciones,
+                gestorClientes = gestorClientes,
+                clienteId = clienteIdActual,
+                esAdministrador = rolActual == Rol.ADMINISTRADOR,
                 onVolver = {
                     mensaje = ""
                     pantalla = if (rolActual == Rol.ADMINISTRADOR) {
@@ -795,6 +867,349 @@ private fun TarjetaMenu(
                 style = MaterialTheme.typography.titleMedium
             )
             Text(descripcion)
+        }
+    }
+}
+
+@Composable
+fun PantallaPlanes(
+    esAdministrador: Boolean,
+    onVolver: () -> Unit
+) {
+    val planes = listOf(PlanBasico(), PlanPremium())
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Planes de Lavado",
+            style = MaterialTheme.typography.headlineMedium
+        )
+        
+        if (esAdministrador) {
+            Text(
+                text = "Modo Administrador: Puedes ver los planes ofrecidos.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        } else {
+            Text(
+                text = "Descubre nuestros planes diseñados para mantener tu vehículo impecable.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary
+            )
+        }
+        
+        Spacer(Modifier.height(8.dp))
+        
+        planes.forEach { plan ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = plan.nombre,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                    Text(
+                        text = "Precio mensual: \$${plan.precioMensual}",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        text = "Lavados incluidos: ${plan.limiteLavadosMensuales ?: "Ilimitados"}",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+        }
+        
+        Spacer(Modifier.height(16.dp))
+
+        Button(
+            onClick = onVolver,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Volver al menú")
+        }
+    }
+}
+
+@Composable
+fun PantallaSuscripciones(
+    gestorSuscripciones: GestorSuscripciones,
+    gestorVehiculos: GestorVehiculos,
+    gestorClientes: GestorClientes,
+    clienteId: Int?,
+    esAdministrador: Boolean,
+    onVolver: () -> Unit
+) {
+    val suscripciones = remember { mutableStateListOf<Suscripcion>() }
+    var idClienteAsignar by remember { mutableStateOf("") }
+    var idVehiculoAsignar by remember { mutableStateOf("") }
+    var planElegido by remember { mutableStateOf(1) } // 1: Básico, 2: Premium
+    var mensaje by remember { mutableStateOf("") }
+
+    fun actualizarLista() {
+        suscripciones.clear()
+        gestorSuscripciones.actualizarEstados()
+        val lista = if (esAdministrador) {
+            gestorSuscripciones.obtenerTodas()
+        } else {
+            clienteId?.let { id ->
+                gestorSuscripciones.obtenerTodas().filter { it.cliente.id == id }
+            } ?: emptyList()
+        }
+        suscripciones.addAll(lista)
+    }
+
+    LaunchedEffect(clienteId, esAdministrador) {
+        actualizarLista()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Suscripciones",
+            style = MaterialTheme.typography.headlineMedium
+        )
+
+        // Asignar Plan 
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "Asignar Suscripción",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                
+                if (esAdministrador) {
+                    OutlinedTextField(
+                        value = idClienteAsignar,
+                        onValueChange = { idClienteAsignar = it },
+                        label = { Text("ID del Cliente") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                
+                OutlinedTextField(
+                    value = idVehiculoAsignar,
+                    onValueChange = { idVehiculoAsignar = it },
+                    label = { Text("ID del Vehículo") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Plan: ")
+                    TextButton(onClick = { planElegido = 1 }, enabled = planElegido != 1) { Text("Básico") }
+                    TextButton(onClick = { planElegido = 2 }, enabled = planElegido != 2) { Text("Premium") }
+                }
+
+                if (mensaje.isNotBlank()) {
+                    Text(mensaje, color = MaterialTheme.colorScheme.primary)
+                }
+
+                Button(
+                    onClick = {
+                        val vehId = idVehiculoAsignar.toIntOrNull()
+                        val cliId = if (esAdministrador) idClienteAsignar.toIntOrNull() else clienteId
+                        
+                        if (vehId == null || cliId == null) {
+                            mensaje = "Por favor, ingresa IDs válidos."
+                            return@Button
+                        }
+                        
+                        val plan = if (planElegido == 1) PlanBasico() else PlanPremium()
+                        val vehiculo = gestorVehiculos.obtenerTodos().find { it.id == vehId }
+                        val cliente = gestorClientes.obtenerClientes().find { it.id == cliId }
+                        
+                        if (vehiculo == null) {
+                            mensaje = "Vehículo no encontrado."
+                        } else if (cliente == null) {
+                            mensaje = "Cliente no encontrado."
+                        } else if (vehiculo.clienteId != cliente.id) {
+                            mensaje = "Ese vehículo no te pertenece."
+                        } else if (gestorSuscripciones.tieneSuscripcionActiva(vehiculo.id)) {
+                            mensaje = "Este vehículo ya tiene una suscripción."
+                        } else {
+                            val exito = gestorSuscripciones.crearSuscripcion(cliId, vehId, plan)
+                            if (exito) {
+                                mensaje = "Suscripción asignada exitosamente."
+                                actualizarLista()
+                                idVehiculoAsignar = ""
+                                idClienteAsignar = ""
+                            } else {
+                                mensaje = "Error al asignar suscripción."
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Asignar a Vehículo")
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Lista de Suscripciones",
+            style = MaterialTheme.typography.titleLarge
+        )
+
+        if (suscripciones.isEmpty()) {
+            Text("No hay suscripciones registradas.")
+        } else {
+            suscripciones.forEach { sub ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text("Suscripción ID: ${sub.id}", style = MaterialTheme.typography.titleMedium)
+                        Text("Vehículo: ${sub.vehiculo.placa}")
+                        if (esAdministrador) Text("Cliente: ${sub.cliente.nombre}")
+                        Text("Plan: ${sub.plan.nombre} ($${sub.plan.precioMensual})")
+                        val formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy")
+                        Text("Vigencia: ${sub.fechaInicio.format(formatter)} al ${sub.fechaFin.format(formatter)}")
+                        Text(
+                            text = "Estado: ${sub.estado}", 
+                            color = if (sub.estado == EstadoSuscripcion.ACTIVA) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error
+                        )
+
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(top = 8.dp)
+                        ) {
+                            Button(
+                                onClick = {
+                                    val renovado = gestorSuscripciones.renovarSuscripcion(sub.id, 1)
+                                    if (renovado) {
+                                        mensaje = "Suscripción #${sub.id} renovada por 1 mes."
+                                        actualizarLista()
+                                    } else {
+                                        mensaje = "No se pudo renovar la suscripción."
+                                    }
+                                }
+                            ) {
+                                Text("Renovar (+1 mes)")
+                            }
+
+                            Button(
+                                onClick = {
+                                    val eliminado = gestorSuscripciones.eliminarSuscripcion(sub.id)
+                                    if (eliminado) {
+                                        mensaje = "Suscripción #${sub.id} eliminada del sistema."
+                                        actualizarLista()
+                                    } else {
+                                        mensaje = "No se pudo eliminar."
+                                    }
+                                }
+                            ) {
+                                Text("Eliminar")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = onVolver, modifier = Modifier.fillMaxWidth()) {
+            Text("Volver al menú")
+        }
+    }
+}
+
+@Composable
+fun PantallaHistorial(
+    gestorSuscripciones: GestorSuscripciones,
+    gestorClientes: GestorClientes,
+    clienteId: Int?,
+    esAdministrador: Boolean,
+    onVolver: () -> Unit
+) {
+    val clientes = gestorClientes.obtenerClientes()
+    val suscripciones = gestorSuscripciones.obtenerTodas()
+    
+    val suscripcionesActivas = suscripciones.count { it.estado == EstadoSuscripcion.ACTIVA }
+    val suscripcionesVencidas = suscripciones.count { it.estado == EstadoSuscripcion.VENCIDA }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text(
+            text = "Historial / Reportes",
+            style = MaterialTheme.typography.headlineMedium
+        )
+        
+        if (esAdministrador) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("Resumen General Washify", style = MaterialTheme.typography.titleLarge)
+                    Text("Clientes registrados: ${clientes.size}")
+                    Text("Suscripciones totales: ${suscripciones.size}")
+                    Text("Suscripciones activas: $suscripcionesActivas", color = MaterialTheme.colorScheme.primary)
+                    Text("Suscripciones vencidas: $suscripcionesVencidas", color = MaterialTheme.colorScheme.error)
+                }
+            }
+            
+            Spacer(Modifier.height(8.dp))
+            Text("Todas las Suscripciones Históricas", style = MaterialTheme.typography.titleMedium)
+            if (suscripciones.isEmpty()) {
+                Text("No hay historial registrado.")
+            } else {
+                suscripciones.forEach { sub ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Cliente: ${sub.cliente.nombre} | Vehículo: ${sub.vehiculo.placa}")
+                            Text("Plan: ${sub.plan.nombre} - Estado: ${sub.estado}")
+                        }
+                    }
+                }
+            }
+        } else {
+            val misSuscripciones = clienteId?.let { id ->
+                suscripciones.filter { it.cliente.id == id }
+            } ?: emptyList()
+            
+            Text("Tu Historial de Suscripciones", style = MaterialTheme.typography.titleLarge)
+            if (misSuscripciones.isEmpty()) {
+                Text("Todavía no tienes historial registrado.")
+            } else {
+                misSuscripciones.forEach { sub ->
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text("Vehículo: ${sub.vehiculo.placa}", style = MaterialTheme.typography.titleMedium)
+                            Text("Plan: ${sub.plan.nombre} - Estado: ${sub.estado}")
+                            val formatter = DateTimeFormatter.ofPattern("dd-MM-yyyy")
+                            Text("Adquirido el: ${sub.fechaInicio.format(formatter)}")
+                        }
+                    }
+                }
+            }
+        }
+        
+        Spacer(Modifier.height(16.dp))
+        Button(onClick = onVolver, modifier = Modifier.fillMaxWidth()) {
+            Text("Volver al menú")
         }
     }
 }
