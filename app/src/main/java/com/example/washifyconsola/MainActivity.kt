@@ -1204,17 +1204,22 @@ private fun PantallaSuscripciones(
                 FilterChip(selected = mesesDuracion == 6, onClick = { mesesDuracion = 6 }, label = { Text("6 Meses") })
             }
 
-            Text("Método de Pago:", style = MaterialTheme.typography.labelLarge)
+            Text("Método de Pago con el que se realizó el pago:", style = MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(
-                    selected = metodoPago == "Tarjeta de Crédito / Débito",
-                    onClick = { metodoPago = "Tarjeta de Crédito / Débito" },
-                    label = { Text("Tarjeta") }
-                )
                 FilterChip(
                     selected = metodoPago == "Efectivo",
                     onClick = { metodoPago = "Efectivo" },
                     label = { Text("Efectivo") }
+                )
+                FilterChip(
+                    selected = metodoPago == "Tarjeta (POS/Terminal)",
+                    onClick = { metodoPago = "Tarjeta (POS/Terminal)" },
+                    label = { Text("Tarjeta") }
+                )
+                FilterChip(
+                    selected = metodoPago == "Transferencia Bancaria",
+                    onClick = { metodoPago = "Transferencia Bancaria" },
+                    label = { Text("Transferencia") }
                 )
             }
 
