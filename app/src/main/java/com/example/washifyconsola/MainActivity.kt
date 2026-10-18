@@ -730,11 +730,19 @@ fun WashifyApp() {
                         Spacer(Modifier.height(8.dp))
 
                         Button(
-                            onClick = { cerrarSesion() },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            onClick = {
+                                pantalla = if (esAdmin) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
+                            },
+                            modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Cerrar Sesión")
+                            Text("← Volver al Menú Principal")
+                        }
+
+                        OutlinedButton(
+                            onClick = { cerrarSesion() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Cerrar Sesión", color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -950,6 +958,14 @@ private fun PantallaVehiculos(
             }
         }
     }
+
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = onVolver,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    ) {
+        Text("← Volver al Menú Principal")
+    }
 }
 
 @Composable
@@ -1058,6 +1074,14 @@ private fun PantallaClientes(
             }
         }
     }
+
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = onVolver,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    ) {
+        Text("← Volver al Menú Principal")
+    }
 }
 
 @Composable
@@ -1113,6 +1137,14 @@ private fun PantallaPlanes(
                     )
                 }
             }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Button(
+            onClick = onVolver,
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+        ) {
+            Text("← Volver al Menú Principal")
         }
     }
 }
@@ -1372,6 +1404,14 @@ private fun PantallaSuscripciones(
             }
         }
     }
+
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = onVolver,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    ) {
+        Text("← Volver al Menú Principal")
+    }
 }
 
 @Composable
@@ -1420,61 +1460,78 @@ private fun PantallaHistorial(
             }
         }
 
-        // Service Wash Trigger Section
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(
-                    text = "Registrar Lavado Realizado 🧼✨",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Selecciona un vehículo con suscripción activa para marcar un lavado efectuado.",
-                    style = MaterialTheme.typography.bodySmall
-                )
-
-                val suscripcionesDisponibles = if (esAdministrador) activas else activas.filter { it.cliente.id == clienteId }
-
-                if (suscripcionesDisponibles.isEmpty()) {
-                    Text("No hay suscripciones activas disponibles para registrar lavados.", color = Color.Gray)
-                } else {
-                    OutlinedTextField(
-                        value = vehiculoSeleccionadoId,
-                        onValueChange = { vehiculoSeleccionadoId = it },
-                        label = { Text("Ingresa ID de Suscripción Activa") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+        // Service Wash Trigger Section (Solo para Administradores/Personal del Autolavado)
+        if (esAdministrador) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Registrar Lavado Realizado (Exclusivo Admin) 🧼✨",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Selecciona un vehículo de un cliente con suscripción activa para registrar que se efectuó el servicio de lavado.",
+                        style = MaterialTheme.typography.bodySmall
                     )
 
-                    if (mensajeLavado.isNotBlank()) {
-                        Text(
-                            text = mensajeLavado,
-                            color = if (mensajeLavado.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                            fontWeight = FontWeight.SemiBold
+                    if (activas.isEmpty()) {
+                        Text("No hay suscripciones activas en el sistema para registrar lavados.", color = Color.Gray)
+                    } else {
+                        OutlinedTextField(
+                            value = vehiculoSeleccionadoId,
+                            onValueChange = { vehiculoSeleccionadoId = it },
+                            label = { Text("Ingresa ID de Suscripción Activa") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
-                    }
 
-                    Button(
-                        onClick = {
-                            val subId = vehiculoSeleccionadoId.toIntOrNull()
-                            val sub = suscripcionesDisponibles.find { it.id == subId }
+                        if (mensajeLavado.isNotBlank()) {
+                            Text(
+                                text = mensajeLavado,
+                                color = if (mensajeLavado.startsWith("✅")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
 
-                            if (sub == null) {
-                                mensajeLavado = "Ingresa un ID de suscripción activa válido."
-                            } else {
-                                onRegistrarLavado(sub.vehiculo.placa, sub.cliente.nombre, sub.plan.nombre)
-                                mensajeLavado = "✅ ¡Lavado registrado exitosamente para la placa ${sub.vehiculo.placa}!"
-                                vehiculoSeleccionadoId = ""
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Marcar Lavado como Realizado")
+                        Button(
+                            onClick = {
+                                val subId = vehiculoSeleccionadoId.toIntOrNull()
+                                val sub = activas.find { it.id == subId }
+
+                                if (sub == null) {
+                                    mensajeLavado = "Ingresa un ID de suscripción activa válido."
+                                } else {
+                                    onRegistrarLavado(sub.vehiculo.placa, sub.cliente.nombre, sub.plan.nombre)
+                                    mensajeLavado = "✅ ¡Lavado registrado exitosamente para la placa ${sub.vehiculo.placa}!"
+                                    vehiculoSeleccionadoId = ""
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Marcar Servicio de Lavado Realizado")
+                        }
                     }
+                }
+            }
+        } else {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = "ℹ️ Historial de Servicios",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Aquí puedes consultar cada uno de los lavados que el personal de Washify ha registrado en tus vehículos suscritos.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                 }
             }
         }
@@ -1522,6 +1579,14 @@ private fun PantallaHistorial(
                 }
             }
         }
+    }
+
+    Spacer(Modifier.height(8.dp))
+    Button(
+        onClick = onVolver,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    ) {
+        Text("← Volver al Menú Principal")
     }
 }
 
