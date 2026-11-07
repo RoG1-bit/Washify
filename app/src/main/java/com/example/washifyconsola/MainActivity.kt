@@ -328,6 +328,32 @@ fun WashifyApp() {
                             Text("Iniciar sesión", fontSize = 16.sp)
                         }
 
+                        OutlinedButton(
+                            onClick = {
+                                val userEmail = "usuario.google@washify.com"
+                                val userName = "Usuario Google"
+                                correoActual = userEmail
+                                nombreActual = userName
+                                rolActual = Rol.CLIENTE
+
+                                var cliente = gestorClientes.obtenerClientes().find {
+                                    it.correo.equals(userEmail, ignoreCase = true)
+                                }
+                                if (cliente == null) {
+                                    gestorClientes.registrarCliente(userName, userEmail)
+                                    cliente = gestorClientes.obtenerClientes().find {
+                                        it.correo.equals(userEmail, ignoreCase = true)
+                                    }
+                                }
+                                clienteIdActual = cliente?.id
+                                mensaje = "✅ Sesión iniciada con Google."
+                                pantalla = Pantalla.INICIO_CLIENTE
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("🌐 Continuar con Google")
+                        }
+
                         TextButton(
                             onClick = {
                                 nombre = ""
@@ -486,6 +512,32 @@ fun WashifyApp() {
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Registrarme")
+                        }
+
+                        OutlinedButton(
+                            onClick = {
+                                val userEmail = "usuario.google@washify.com"
+                                val userName = "Usuario Google"
+                                correoActual = userEmail
+                                nombreActual = userName
+                                rolActual = Rol.CLIENTE
+
+                                var cliente = gestorClientes.obtenerClientes().find {
+                                    it.correo.equals(userEmail, ignoreCase = true)
+                                }
+                                if (cliente == null) {
+                                    gestorClientes.registrarCliente(userName, userEmail)
+                                    cliente = gestorClientes.obtenerClientes().find {
+                                        it.correo.equals(userEmail, ignoreCase = true)
+                                    }
+                                }
+                                clienteIdActual = cliente?.id
+                                mensaje = "✅ Sesión iniciada con Google."
+                                pantalla = Pantalla.INICIO_CLIENTE
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("🌐 Registrate con Google")
                         }
 
                         TextButton(
