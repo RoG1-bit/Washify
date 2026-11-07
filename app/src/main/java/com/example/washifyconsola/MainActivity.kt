@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.consola.*
+import com.google.firebase.auth.FirebaseAuth
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -76,6 +77,9 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun WashifyApp() {
     var pantalla by remember { mutableStateOf(Pantalla.LOGIN) }
+    
+    // Firebase Auth
+    val auth = remember { FirebaseAuth.getInstance() }
     
     // Form States
     var nombre by remember { mutableStateOf("") }
@@ -139,6 +143,7 @@ fun WashifyApp() {
     val esAdmin = rolActual == Rol.ADMINISTRADOR
 
     fun cerrarSesion() {
+        try { auth.signOut() } catch (_: Exception) {}
         nombreActual = ""
         correoActual = ""
         rolActual = null
@@ -272,33 +277,50 @@ fun WashifyApp() {
                                     return@Button
                                 }
 
-                                val cuenta = cuentas.find {
+                                val cuentaLocal = cuentas.find {
                                     it.correo.equals(correoIngresado, ignoreCase = true) &&
                                             it.contrasena == password
                                 }
 
-                                if (cuenta == null) {
-                                    mensaje = "Credenciales incorrectas. Verifica tu correo o contraseña."
-                                } else {
-                                    nombreActual = cuenta.nombre
-                                    correoActual = cuenta.correo
-                                    rolActual = cuenta.rol
+                                fun procesarLogin(emailUser: String, nameUser: String, isAdminUser: Boolean) {
+                                    correoActual = emailUser
+                                    nombreActual = nameUser
+                                    val esAdminUser = isAdminUser || emailUser.equals("admin@washify.com", ignoreCase = true)
+                                    rolActual = if (esAdminUser) Rol.ADMINISTRADOR else Rol.CLIENTE
                                     mensaje = ""
 
-                                    if (cuenta.rol == Rol.CLIENTE) {
-                                        val cliente = gestorClientes.obtenerClientes().firstOrNull {
-                                            it.correo.equals(cuenta.correo, ignoreCase = true)
+                                    if (!esAdminUser) {
+                                        var cliente = gestorClientes.obtenerClientes().find {
+                                            it.correo.equals(emailUser, ignoreCase = true)
                                         }
                                         if (cliente == null) {
-                                            mensaje = "No se encontró el perfil de cliente asociado."
-                                            return@Button
+                                            gestorClientes.registrarCliente(nameUser, emailUser)
+                                            cliente = gestorClientes.obtenerClientes().find {
+                                                it.correo.equals(emailUser, ignoreCase = true)
+                                            }
                                         }
-                                        clienteIdActual = cliente.id
+                                        clienteIdActual = cliente?.id
                                     } else {
                                         clienteIdActual = null
                                     }
 
-                                    pantalla = if (cuenta.rol == Rol.CLIENTE) Pantalla.INICIO_CLIENTE else Pantalla.INICIO_ADMIN
+                                    pantalla = if (esAdminUser) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
+                                }
+
+                                if (cuentaLocal != null) {
+                                    procesarLogin(cuentaLocal.correo, cuentaLocal.nombre, cuentaLocal.rol == Rol.ADMINISTRADOR)
+                                } else {
+                                    auth.signInWithEmailAndPassword(correoIngresado, password)
+                                        .addOnCompleteListener { task ->
+                                            if (task.isSuccessful) {
+                                                val user = auth.currentUser
+                                                val userEmail = user?.email ?: correoIngresado
+                                                val userName = user?.displayName ?: userEmail.substringBefore("@")
+                                                procesarLogin(userEmail, userName, userEmail.equals("admin@washify.com", ignoreCase = true))
+                                            } else {
+                                                mensaje = "Credenciales incorrectas o usuario no registrado."
+                                            }
+                                        }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
@@ -433,29 +455,31 @@ fun WashifyApp() {
                                     password != confirmPassword -> {
                                         mensaje = "Las contraseñas no coinciden."
                                     }
-                                    cuentas.any { it.correo.equals(correo, ignoreCase = true) } -> {
-                                        mensaje = "Ese correo electrónico ya está registrado."
-                                    }
                                     else -> {
-                                        val registrado = gestorClientes.registrarCliente(nombreIngresado, correo)
-                                        if (registrado) {
-                                            cuentas.add(
-                                                CuentaTemporal(
-                                                    nombre = nombreIngresado,
-                                                    correo = correo,
-                                                    contrasena = password,
-                                                    rol = Rol.CLIENTE
-                                                )
-                                            )
-                                            nombre = ""
-                                            email = correo
-                                            password = ""
-                                            confirmPassword = ""
-                                            mensaje = "¡Cuenta creada con éxito! Ya puedes iniciar sesión."
-                                            pantalla = Pantalla.LOGIN
-                                        } else {
-                                            mensaje = "Ocurrió un error al registrar el cliente."
-                                        }
+                                        auth.createUserWithEmailAndPassword(correo, password)
+                                            .addOnCompleteListener { task ->
+                                                if (task.isSuccessful) {
+                                                    val registrado = gestorClientes.registrarCliente(nombreIngresado, correo)
+                                                    if (registrado) {
+                                                        cuentas.add(
+                                                            CuentaTemporal(
+                                                                nombre = nombreIngresado,
+                                                                correo = correo,
+                                                                contrasena = password,
+                                                                rol = Rol.CLIENTE
+                                                            )
+                                                        )
+                                                    }
+                                                    nombre = ""
+                                                    email = correo
+                                                    password = ""
+                                                    confirmPassword = ""
+                                                    mensaje = "¡Cuenta registrada en Firebase con éxito! Inicia sesión."
+                                                    pantalla = Pantalla.LOGIN
+                                                } else {
+                                                    mensaje = "Error al crear cuenta: ${task.exception?.localizedMessage}"
+                                                }
+                                            }
                                     }
                                 }
                             },

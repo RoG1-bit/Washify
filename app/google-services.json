@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "664236089955",
+    "project_id": "washify-a58e4",
+    "storage_bucket": "washify-a58e4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:664236089955:android:07efe912af0f5062ea4e56",
+        "android_client_info": {
+          "package_name": "com.example.washifyconsola"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCLyStdq0Q8msVqP_yAUPX5WrAfGG9bDa8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
