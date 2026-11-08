@@ -1,0 +1,36 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /usuarios/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    function administraHistorial() {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/administradores/$(request.auth.uid)).data.activo == true;
+    }
+
+    match /lavados/{lavadoId} {
+      allow read: if request.auth != null &&
+        (resource.data.clienteUid == request.auth.uid || administraHistorial());
+
+      allow create: if administraHistorial() && datosValidos();
+
+      function datosValidos() {
+        let datos = request.resource.data;
+        return datos.keys().hasOnly([
+            'clienteUid', 'registradoPorUid', 'vehiculoPlaca',
+            'clienteNombre', 'planNombre', 'fechaHora'
+          ]) &&
+          (datos.clienteUid == null ||
+            (datos.clienteUid is string && datos.clienteUid.size() > 0 && datos.clienteUid.size() <= 128)) &&
+          datos.registradoPorUid == request.auth.uid &&
+          datos.vehiculoPlaca is string && datos.vehiculoPlaca.size() > 0 &&
+          datos.clienteNombre is string && datos.clienteNombre.size() > 0 &&
+          datos.planNombre is string && datos.planNombre.size() > 0 &&
+          datos.fechaHora == request.time;
+      }
+    }
+  }
+}

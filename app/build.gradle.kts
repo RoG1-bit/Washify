@@ -58,9 +58,10 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    // Firebase BoM and Auth
+    // Firebase
     implementation(platform("com.google.firebase:firebase-bom:33.9.0"))
     implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.android.gms:play-services-auth:21.3.0")
 
     implementation(project(":consola"))

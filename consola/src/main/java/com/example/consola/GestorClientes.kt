@@ -7,7 +7,8 @@ class GestorClientes {
 
     fun registrarCliente(
         nombre: String,
-        correo: String
+        correo: String,
+        firebaseUid: String? = null
     ): Boolean {
 
         if (nombre.isBlank() || correo.isBlank()) {
@@ -20,7 +21,8 @@ class GestorClientes {
         val nuevoCliente = Cliente(
             contadorId++,
             nombre,
-            correo
+            correo,
+            firebaseUid
         )
 
         listaClientes.add(nuevoCliente)
