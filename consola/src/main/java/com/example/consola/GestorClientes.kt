@@ -107,6 +107,15 @@ class GestorClientes {
         }
     }
 
+
+
+    fun sincronizarClientes(clientesFirestore: List<Cliente>) {
+        listaClientes.clear()
+        listaClientes.addAll(clientesFirestore)
+
+        // Evitar repetir IDs al registrar nuevos clientes.
+        contadorId = (listaClientes.maxOfOrNull { it.id } ?: 0) + 1
+    }
     /*
      * Permite que otros módulos, como Reportes,
      * puedan consultar los clientes sin modificar

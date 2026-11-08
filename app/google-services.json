@@ -12,7 +12,20 @@
           "package_name": "com.example.washifyconsola"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "664236089955-kdjhqijul2u8g8jbtsh20a1eqnjnmurk.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.washifyconsola",
+            "certificate_hash": "4477e88a916f9acc5769916ea9a006ab27ea2f73"
+          }
+        },
+        {
+          "client_id": "664236089955-bdom23h7jbpj92g8vus704pv3lugp4mo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyCLyStdq0Q8msVqP_yAUPX5WrAfGG9bDa8"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "664236089955-bdom23h7jbpj92g8vus704pv3lugp4mo.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
