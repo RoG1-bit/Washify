@@ -23,6 +23,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.consola.*
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -77,6 +84,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun WashifyApp() {
     var pantalla by remember { mutableStateOf(Pantalla.LOGIN) }
+    val context = LocalContext.current
     
     // Firebase Auth
     val auth = remember { FirebaseAuth.getInstance() }
@@ -110,6 +118,81 @@ fun WashifyApp() {
     // Wash Log History
     val historialLavados = remember { mutableStateListOf<RegistroLavado>() }
     var contadorLavados by remember { mutableStateOf(1) }
+
+    fun procesarLoginExitoso(emailUser: String, nameUser: String, isAdminUser: Boolean) {
+        correoActual = emailUser
+        nombreActual = nameUser
+        val esAdminUser = isAdminUser || emailUser.equals("admin@washify.com", ignoreCase = true)
+        rolActual = if (esAdminUser) Rol.ADMINISTRADOR else Rol.CLIENTE
+        mensaje = ""
+
+        if (!esAdminUser) {
+            var cliente = gestorClientes.obtenerClientes().find {
+                it.correo.equals(emailUser, ignoreCase = true)
+            }
+            if (cliente == null) {
+                gestorClientes.registrarCliente(nameUser, emailUser)
+                cliente = gestorClientes.obtenerClientes().find {
+                    it.correo.equals(emailUser, ignoreCase = true)
+                }
+            }
+            clienteIdActual = cliente?.id
+        } else {
+            clienteIdActual = null
+        }
+
+        pantalla = if (esAdminUser) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
+    }
+
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(ApiException::class.java)
+            val idToken = account.idToken
+            if (!idToken.isNullOrBlank()) {
+                val credential = GoogleAuthProvider.getCredential(idToken, null)
+                auth.signInWithCredential(credential).addOnCompleteListener { authTask ->
+                    if (authTask.isSuccessful) {
+                        val user = auth.currentUser
+                        val userEmail = user?.email ?: account.email ?: ""
+                        val userName = user?.displayName ?: account.displayName ?: "Usuario Google"
+                        procesarLoginExitoso(userEmail, userName, userEmail.equals("admin@washify.com", ignoreCase = true))
+                    } else {
+                        mensaje = "Error al autenticar en Firebase con Google: ${authTask.exception?.localizedMessage}"
+                    }
+                }
+            } else {
+                val userEmail = account.email ?: "usuario.google@washify.com"
+                val userName = account.displayName ?: "Usuario Google"
+                procesarLoginExitoso(userEmail, userName, false)
+            }
+        } catch (e: Exception) {
+            mensaje = "Google Sign-In no disponible o cancelado (${e.localizedMessage})."
+        }
+    }
+
+    fun iniciarGoogleSignIn() {
+        try {
+            val defaultWebClientId = try {
+                val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+                if (resId != 0) context.getString(resId) else ""
+            } catch (_: Exception) { "" }
+
+            val gsoBuilder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail()
+            if (defaultWebClientId.isNotBlank()) {
+                gsoBuilder.requestIdToken(defaultWebClientId)
+            }
+
+            val googleSignInClient = GoogleSignIn.getClient(context, gsoBuilder.build())
+            googleSignInClient.signOut().addOnCompleteListener {
+                googleSignInLauncher.launch(googleSignInClient.signInIntent)
+            }
+        } catch (e: Exception) {
+            mensaje = "Error al abrir ventana de Google: ${e.localizedMessage}"
+        }
+    }
 
     // Seed Initial Test Data
     val cuentas = remember {
@@ -330,24 +413,7 @@ fun WashifyApp() {
 
                         OutlinedButton(
                             onClick = {
-                                val userEmail = "usuario.google@washify.com"
-                                val userName = "Usuario Google"
-                                correoActual = userEmail
-                                nombreActual = userName
-                                rolActual = Rol.CLIENTE
-
-                                var cliente = gestorClientes.obtenerClientes().find {
-                                    it.correo.equals(userEmail, ignoreCase = true)
-                                }
-                                if (cliente == null) {
-                                    gestorClientes.registrarCliente(userName, userEmail)
-                                    cliente = gestorClientes.obtenerClientes().find {
-                                        it.correo.equals(userEmail, ignoreCase = true)
-                                    }
-                                }
-                                clienteIdActual = cliente?.id
-                                mensaje = "✅ Sesión iniciada con Google."
-                                pantalla = Pantalla.INICIO_CLIENTE
+                                iniciarGoogleSignIn()
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -516,28 +582,11 @@ fun WashifyApp() {
 
                         OutlinedButton(
                             onClick = {
-                                val userEmail = "usuario.google@washify.com"
-                                val userName = "Usuario Google"
-                                correoActual = userEmail
-                                nombreActual = userName
-                                rolActual = Rol.CLIENTE
-
-                                var cliente = gestorClientes.obtenerClientes().find {
-                                    it.correo.equals(userEmail, ignoreCase = true)
-                                }
-                                if (cliente == null) {
-                                    gestorClientes.registrarCliente(userName, userEmail)
-                                    cliente = gestorClientes.obtenerClientes().find {
-                                        it.correo.equals(userEmail, ignoreCase = true)
-                                    }
-                                }
-                                clienteIdActual = cliente?.id
-                                mensaje = "✅ Sesión iniciada con Google."
-                                pantalla = Pantalla.INICIO_CLIENTE
+                                iniciarGoogleSignIn()
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("🌐 Registrate con Google")
+                            Text("🌐 Registrarme con Google")
                         }
 
                         TextButton(
