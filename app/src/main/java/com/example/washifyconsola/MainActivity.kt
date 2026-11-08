@@ -440,37 +440,6 @@ fun WashifyApp() {
                         ) {
                             Text("¿No tienes cuenta? Regístrate aquí")
                         }
-
-                        Divider(modifier = Modifier.padding(vertical = 8.dp))
-
-                        Text("Accesos Rápido para Demostración:", style = MaterialTheme.typography.labelMedium)
-
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            OutlinedButton(
-                                onClick = {
-                                    email = "admin@washify.com"
-                                    password = "Admin123"
-                                    mensaje = "Credenciales de Administrador cargadas."
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Demo Admin", fontSize = 12.sp)
-                            }
-
-                            OutlinedButton(
-                                onClick = {
-                                    email = "juan@washify.com"
-                                    password = "Cliente123"
-                                    mensaje = "Credenciales de Cliente cargadas."
-                                },
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Demo Cliente", fontSize = 12.sp)
-                            }
-                        }
                     }
                 }
             }
@@ -574,7 +543,7 @@ fun WashifyApp() {
                                                     email = correo
                                                     password = ""
                                                     confirmPassword = ""
-                                                    mensaje = "¡Cuenta registrada en Firebase con éxito! Inicia sesión."
+                                                    mensaje = "¡Cuenta creada con éxito! Ya puedes iniciar sesión."
                                                     pantalla = Pantalla.LOGIN
                                                 } else {
                                                     mensaje = "Error al crear cuenta: ${task.exception?.localizedMessage}"
