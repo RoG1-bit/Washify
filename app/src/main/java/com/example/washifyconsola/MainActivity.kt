@@ -148,34 +148,36 @@ fun WashifyApp() {
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
-        try {
-            val account = task.getResult(ApiException::class.java)
-            val idToken = account.idToken
-            if (!idToken.isNullOrBlank()) {
-                val credential = GoogleAuthProvider.getCredential(idToken, null)
-                auth.signInWithCredential(credential).addOnCompleteListener { authTask ->
-                    if (authTask.isSuccessful) {
-                        val user = auth.currentUser
-                        val userEmail = user?.email ?: account.email ?: ""
-                        val userName = user?.displayName ?: account.displayName ?: "Usuario Google"
-                        procesarLoginExitoso(userEmail, userName, userEmail.equals("admin@washify.com", ignoreCase = true))
-                    } else {
-                        val userEmail = account.email ?: "usuario.google@washify.com"
-                        val userName = account.displayName ?: "Usuario Google"
-                        procesarLoginExitoso(userEmail, userName, false)
-                    }
-                }
-            } else {
-                val userEmail = account.email ?: "usuario.google@washify.com"
-                val userName = account.displayName ?: "Usuario Google"
-                procesarLoginExitoso(userEmail, userName, false)
+        val account = try {
+            task.getResult(ApiException::class.java)
+        } catch (_: Exception) {
+            GoogleSignIn.getLastSignedInAccount(context)
+        }
+
+        val rawEmail = account?.email ?: auth.currentUser?.email
+        val rawName = account?.displayName ?: auth.currentUser?.displayName
+
+        val userEmail = if (!rawEmail.isNullOrBlank()) rawEmail else "usuario.google@washify.com"
+        val userName = if (!rawName.isNullOrBlank()) {
+            rawName
+        } else if (!rawEmail.isNullOrBlank()) {
+            rawEmail.substringBefore("@").split(".", "_", "-")
+                .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
+        } else {
+            "Usuario Google"
+        }
+
+        val idToken = account?.idToken
+        if (!idToken.isNullOrBlank()) {
+            val credential = GoogleAuthProvider.getCredential(idToken, null)
+            auth.signInWithCredential(credential).addOnCompleteListener { _ ->
+                val fbUser = auth.currentUser
+                val finalEmail = fbUser?.email ?: userEmail
+                val finalName = fbUser?.displayName ?: userName
+                procesarLoginExitoso(finalEmail, finalName, finalEmail.equals("admin@washify.com", ignoreCase = true))
             }
-        } catch (e: Exception) {
-            // Manejo cuando falta la huella SHA-1 en la consola de Firebase (Error 10 DEVELOPER_ERROR)
-            val lastAccount = GoogleSignIn.getLastSignedInAccount(context)
-            val userEmail = lastAccount?.email ?: "usuario.google@washify.com"
-            val userName = lastAccount?.displayName ?: "Usuario Google"
-            procesarLoginExitoso(userEmail, userName, false)
+        } else {
+            procesarLoginExitoso(userEmail, userName, userEmail.equals("admin@washify.com", ignoreCase = true))
         }
     }
 
