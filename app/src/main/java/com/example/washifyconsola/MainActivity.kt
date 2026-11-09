@@ -23,35 +23,22 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.consola.*
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
-import java.time.LocalDateTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private enum class Rol {
     CLIENTE,
     ADMINISTRADOR
 }
-
-private data class CuentaTemporal(
-    val nombre: String,
-    val correo: String,
-    var contrasena: String,
-    val rol: Rol
-)
-
-private data class RegistroLavado(
-    val id: Int,
-    val vehiculoPlaca: String,
-    val clienteNombre: String,
-    val planNombre: String,
-    val fechaHora: String
-)
 
 private enum class Pantalla {
     LOGIN,
@@ -102,6 +89,7 @@ fun WashifyApp() {
     var correoActual by remember { mutableStateOf("") }
     var rolActual by remember { mutableStateOf<Rol?>(null) }
     var clienteIdActual by remember { mutableStateOf<Int?>(null) }
+    var uidActual by remember { mutableStateOf<String?>(null) }
 
     // Repositories / Handlers
     val gestorClientes = remember { GestorClientes() }
@@ -115,28 +103,35 @@ fun WashifyApp() {
         )
     }
 
-    // Wash Log History
-    val historialLavados = remember { mutableStateListOf<RegistroLavado>() }
-    var contadorLavados by remember { mutableStateOf(1) }
+    fun procesarLoginExitoso(usuario: FirebaseUser) {
+        val correo = usuario.email
+        if (correo.isNullOrBlank()) {
+            auth.signOut()
+            mensaje = "La cuenta debe tener un correo electrónico."
+            return
+        }
 
-    fun procesarLoginExitoso(emailUser: String, nameUser: String, isAdminUser: Boolean) {
-        correoActual = emailUser
-        nombreActual = nameUser
-        val esAdminUser = isAdminUser || emailUser.equals("admin@washify.com", ignoreCase = true)
+        val nombreFirebase = usuario.displayName?.takeIf { it.isNotBlank() } ?: correo.substringBefore('@')
+        correoActual = correo
+        nombreActual = nombreFirebase
+        uidActual = usuario.uid
+        val esAdminUser = correo.equals("admin.washify@example.com", ignoreCase = true)
         rolActual = if (esAdminUser) Rol.ADMINISTRADOR else Rol.CLIENTE
         mensaje = ""
 
         if (!esAdminUser) {
-            var cliente = gestorClientes.obtenerClientes().find {
-                it.correo.equals(emailUser, ignoreCase = true)
-            }
+            val clientesRegistrados = gestorClientes.obtenerClientes()
+            var cliente = clientesRegistrados.find { it.firebaseUid == usuario.uid }
+                ?: clientesRegistrados.find {
+                    usuario.isEmailVerified && it.firebaseUid == null &&
+                        it.correo.equals(correo, ignoreCase = true)
+                }?.apply { firebaseUid = usuario.uid }
             if (cliente == null) {
-                gestorClientes.registrarCliente(nameUser, emailUser)
-                cliente = gestorClientes.obtenerClientes().find {
-                    it.correo.equals(emailUser, ignoreCase = true)
-                }
+                gestorClientes.registrarCliente(nombreFirebase, correo, usuario.uid)
+                cliente = gestorClientes.obtenerClientes().find { it.firebaseUid == usuario.uid }
             }
             clienteIdActual = cliente?.id
+            nombreActual = cliente?.nombre ?: nombreFirebase
         } else {
             clienteIdActual = null
         }
@@ -147,53 +142,43 @@ fun WashifyApp() {
     val googleSignInLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
         val account = try {
-            task.getResult(ApiException::class.java)
-        } catch (_: Exception) {
-            GoogleSignIn.getLastSignedInAccount(context)
-        }
-
-        val rawEmail = account?.email ?: auth.currentUser?.email
-        val rawName = account?.displayName ?: auth.currentUser?.displayName
-
-        val userEmail = if (!rawEmail.isNullOrBlank()) rawEmail else "usuario.google@washify.com"
-        val userName = if (!rawName.isNullOrBlank()) {
-            rawName
-        } else if (!rawEmail.isNullOrBlank()) {
-            rawEmail.substringBefore("@").split(".", "_", "-")
-                .joinToString(" ") { word -> word.replaceFirstChar { it.uppercase() } }
-        } else {
-            "Usuario Google"
+            GoogleSignIn.getSignedInAccountFromIntent(result.data).getResult(ApiException::class.java)
+        } catch (e: ApiException) {
+            mensaje = "No se completó el acceso con Google (código ${e.statusCode})."
+            return@rememberLauncherForActivityResult
         }
 
         val idToken = account?.idToken
-        if (!idToken.isNullOrBlank()) {
-            val credential = GoogleAuthProvider.getCredential(idToken, null)
-            auth.signInWithCredential(credential).addOnCompleteListener { _ ->
-                val fbUser = auth.currentUser
-                val finalEmail = fbUser?.email ?: userEmail
-                val finalName = fbUser?.displayName ?: userName
-                procesarLoginExitoso(finalEmail, finalName, finalEmail.equals("admin@washify.com", ignoreCase = true))
+        if (idToken.isNullOrBlank()) {
+            mensaje = "Google no devolvió un token de acceso para Firebase."
+            return@rememberLauncherForActivityResult
+        }
+
+        val credential = GoogleAuthProvider.getCredential(idToken, null)
+        auth.signInWithCredential(credential).addOnCompleteListener { task ->
+            val usuario = if (task.isSuccessful) task.result?.user else null
+            if (usuario != null) {
+                procesarLoginExitoso(usuario)
+            } else {
+                mensaje = "Firebase no pudo iniciar sesión con Google. Inténtalo nuevamente."
             }
-        } else {
-            procesarLoginExitoso(userEmail, userName, userEmail.equals("admin@washify.com", ignoreCase = true))
         }
     }
 
     fun iniciarGoogleSignIn() {
         try {
-            val defaultWebClientId = try {
-                val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-                if (resId != 0) context.getString(resId) else ""
-            } catch (_: Exception) { "" }
-
-            val gsoBuilder = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail()
-            if (defaultWebClientId.isNotBlank()) {
-                gsoBuilder.requestIdToken(defaultWebClientId)
+            val idRecurso = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+            if (idRecurso == 0) {
+                mensaje = "Configura Google en Firebase y actualiza google-services.json."
+                return
             }
 
-            val googleSignInClient = GoogleSignIn.getClient(context, gsoBuilder.build())
+            val opciones = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+                .requestEmail()
+                .requestIdToken(context.getString(idRecurso))
+                .build()
+            val googleSignInClient = GoogleSignIn.getClient(context, opciones)
             googleSignInClient.signOut().addOnCompleteListener {
                 googleSignInLauncher.launch(googleSignInClient.signInIntent)
             }
@@ -202,30 +187,10 @@ fun WashifyApp() {
         }
     }
 
-    // Seed Initial Test Data
-    val cuentas = remember {
-        mutableStateListOf(
-            CuentaTemporal(
-                nombre = "Administrador Washify",
-                correo = "admin@washify.com",
-                contrasena = "Admin123",
-                rol = Rol.ADMINISTRADOR
-            )
-        )
-    }
-
     // Pre-populate Demo Client
     LaunchedEffect(Unit) {
         if (gestorClientes.obtenerClientes().isEmpty()) {
             gestorClientes.registrarCliente("Juan Pérez", "juan@washify.com")
-            cuentas.add(
-                CuentaTemporal(
-                    nombre = "Juan Pérez",
-                    correo = "juan@washify.com",
-                    contrasena = "Cliente123",
-                    rol = Rol.CLIENTE
-                )
-            )
             val cliente = gestorClientes.obtenerClientes().first()
             gestorVehiculos.registrarVehiculo("P123-456", "Toyota", "Corolla", cliente.id)
         }
@@ -239,6 +204,7 @@ fun WashifyApp() {
         correoActual = ""
         rolActual = null
         clienteIdActual = null
+        uidActual = null
         email = ""
         password = ""
         confirmPassword = ""
@@ -368,51 +334,15 @@ fun WashifyApp() {
                                     return@Button
                                 }
 
-                                val cuentaLocal = cuentas.find {
-                                    it.correo.equals(correoIngresado, ignoreCase = true) &&
-                                            it.contrasena == password
-                                }
-
-                                fun procesarLogin(emailUser: String, nameUser: String, isAdminUser: Boolean) {
-                                    correoActual = emailUser
-                                    nombreActual = nameUser
-                                    val esAdminUser = isAdminUser || emailUser.equals("admin@washify.com", ignoreCase = true)
-                                    rolActual = if (esAdminUser) Rol.ADMINISTRADOR else Rol.CLIENTE
-                                    mensaje = ""
-
-                                    if (!esAdminUser) {
-                                        var cliente = gestorClientes.obtenerClientes().find {
-                                            it.correo.equals(emailUser, ignoreCase = true)
+                                auth.signInWithEmailAndPassword(correoIngresado, password)
+                                    .addOnCompleteListener { task ->
+                                        val usuario = if (task.isSuccessful) task.result?.user else null
+                                        if (usuario != null) {
+                                            procesarLoginExitoso(usuario)
+                                        } else {
+                                            mensaje = "No se pudo iniciar sesión. Verifica tus datos e inténtalo nuevamente."
                                         }
-                                        if (cliente == null) {
-                                            gestorClientes.registrarCliente(nameUser, emailUser)
-                                            cliente = gestorClientes.obtenerClientes().find {
-                                                it.correo.equals(emailUser, ignoreCase = true)
-                                            }
-                                        }
-                                        clienteIdActual = cliente?.id
-                                    } else {
-                                        clienteIdActual = null
                                     }
-
-                                    pantalla = if (esAdminUser) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
-                                }
-
-                                if (cuentaLocal != null) {
-                                    procesarLogin(cuentaLocal.correo, cuentaLocal.nombre, cuentaLocal.rol == Rol.ADMINISTRADOR)
-                                } else {
-                                    auth.signInWithEmailAndPassword(correoIngresado, password)
-                                        .addOnCompleteListener { task ->
-                                            if (task.isSuccessful) {
-                                                val user = auth.currentUser
-                                                val userEmail = user?.email ?: correoIngresado
-                                                val userName = user?.displayName ?: userEmail.substringBefore("@")
-                                                procesarLogin(userEmail, userName, userEmail.equals("admin@washify.com", ignoreCase = true))
-                                            } else {
-                                                mensaje = "Credenciales incorrectas o usuario no registrado."
-                                            }
-                                        }
-                                }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -527,18 +457,10 @@ fun WashifyApp() {
                                     else -> {
                                         auth.createUserWithEmailAndPassword(correo, password)
                                             .addOnCompleteListener { task ->
-                                                if (task.isSuccessful) {
-                                                    val registrado = gestorClientes.registrarCliente(nombreIngresado, correo)
-                                                    if (registrado) {
-                                                        cuentas.add(
-                                                            CuentaTemporal(
-                                                                nombre = nombreIngresado,
-                                                                correo = correo,
-                                                                contrasena = password,
-                                                                rol = Rol.CLIENTE
-                                                            )
-                                                        )
-                                                    }
+                                                val usuario = if (task.isSuccessful) task.result?.user else null
+                                                if (usuario != null) {
+                                                    gestorClientes.registrarCliente(nombreIngresado, correo, usuario.uid)
+                                                    auth.signOut()
                                                     nombre = ""
                                                     email = correo
                                                     password = ""
@@ -791,12 +713,7 @@ fun WashifyApp() {
                     gestorSuscripciones = gestorSuscripciones,
                     gestorClientes = gestorClientes,
                     gestorVehiculos = gestorVehiculos,
-                    historialLavados = historialLavados,
-                    onRegistrarLavado = { placa, clienteNom, planNom ->
-                        val fecha = LocalDateTime.now().format(DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm"))
-                        historialLavados.add(0, RegistroLavado(contadorLavados++, placa, clienteNom, planNom, fecha))
-                    },
-                    clienteId = clienteIdActual,
+                    uid = uidActual,
                     esAdministrador = esAdmin,
                     onVolver = {
                         pantalla = if (esAdmin) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
@@ -1521,20 +1438,54 @@ private fun PantallaHistorial(
     gestorSuscripciones: GestorSuscripciones,
     gestorClientes: GestorClientes,
     gestorVehiculos: GestorVehiculos,
-    historialLavados: List<RegistroLavado>,
-    onRegistrarLavado: (placa: String, clienteNombre: String, planNombre: String) -> Unit,
-    clienteId: Int?,
+    uid: String?,
     esAdministrador: Boolean,
     onVolver: () -> Unit
 ) {
+    if (uid == null) {
+        Text("Inicia sesión con Firebase para consultar el historial.")
+        TextButton(onClick = onVolver) { Text("Volver al menú") }
+        return
+    }
+
+    val repositorio = remember { HistorialFirestore() }
+    val formatoFechaHora = remember {
+        DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm").withZone(ZoneId.systemDefault())
+    }
+    var intentoConsulta by remember(uid) { mutableIntStateOf(0) }
+    var registros by remember(uid, esAdministrador, intentoConsulta) {
+        mutableStateOf<List<RegistroLavado>?>(null)
+    }
+    var errorConsulta by remember(uid, esAdministrador, intentoConsulta) {
+        mutableStateOf<String?>(null)
+    }
+    DisposableEffect(uid, esAdministrador, intentoConsulta) {
+        val escucha = repositorio.observar(
+            uid,
+            esAdministrador,
+            recibir = { registros = it },
+            fallo = { error ->
+                registros = null
+                errorConsulta = if (error.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                    "Firestore rechazó la consulta. Verifica los permisos de la cuenta."
+                } else {
+                    "No se pudo cargar el historial. Verifica tu conexión."
+                }
+            }
+        )
+        onDispose { escucha.remove() }
+    }
+
+    val historialLavados = registros.orEmpty()
     val clientes = gestorClientes.obtenerClientes()
     val suscripciones = gestorSuscripciones.obtenerTodas()
     
     val activas = suscripciones.filter { it.estado == EstadoSuscripcion.ACTIVA }
     val vencidas = suscripciones.filter { it.estado == EstadoSuscripcion.VENCIDA }
 
-    var vehiculoSeleccionadoId by remember { mutableStateOf("") }
-    var mensajeLavado by remember { mutableStateOf("") }
+    var suscripcionSeleccionadaId by remember(uid) { mutableStateOf("") }
+    var mensajeLavado by remember(uid) { mutableStateOf("") }
+    var guardando by remember(uid) { mutableStateOf(false) }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (esAdministrador) {
@@ -1557,7 +1508,7 @@ private fun PantallaHistorial(
                     Text("Total Vehículos Registrados: ${gestorVehiculos.obtenerTodos().size}")
                     Text("Suscripciones Activas: ${activas.size}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                     Text("Suscripciones Vencidas: ${vencidas.size}", color = MaterialTheme.colorScheme.error)
-                    Text("Servicios de Lavado Realizados: ${historialLavados.size}", fontWeight = FontWeight.Bold)
+                    Text("Servicios de Lavado Realizados: ${registros?.size ?: "…"}", fontWeight = FontWeight.Bold)
                 }
             }
         }
@@ -1582,11 +1533,15 @@ private fun PantallaHistorial(
                     if (activas.isEmpty()) {
                         Text("No hay suscripciones activas en el sistema para registrar lavados.", color = Color.Gray)
                     } else {
+                        activas.forEach { suscripcion ->
+                            Text("#${suscripcion.id} · ${suscripcion.vehiculo.placa} · ${suscripcion.cliente.nombre}")
+                        }
                         OutlinedTextField(
-                            value = vehiculoSeleccionadoId,
-                            onValueChange = { vehiculoSeleccionadoId = it },
+                            value = suscripcionSeleccionadaId,
+                            onValueChange = { suscripcionSeleccionadaId = it },
                             label = { Text("Ingresa ID de Suscripción Activa") },
                             modifier = Modifier.fillMaxWidth(),
+                            enabled = !guardando,
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                         )
@@ -1601,20 +1556,30 @@ private fun PantallaHistorial(
 
                         Button(
                             onClick = {
-                                val subId = vehiculoSeleccionadoId.toIntOrNull()
+                                if (guardando) return@Button
+                                val subId = suscripcionSeleccionadaId.toIntOrNull()
                                 val sub = activas.find { it.id == subId }
 
                                 if (sub == null) {
                                     mensajeLavado = "Ingresa un ID de suscripción activa válido."
                                 } else {
-                                    onRegistrarLavado(sub.vehiculo.placa, sub.cliente.nombre, sub.plan.nombre)
-                                    mensajeLavado = "✅ ¡Lavado registrado exitosamente para la placa ${sub.vehiculo.placa}!"
-                                    vehiculoSeleccionadoId = ""
+                                    guardando = true
+                                    mensajeLavado = ""
+                                    repositorio.registrar(uid, sub).addOnCompleteListener { tarea ->
+                                        guardando = false
+                                        if (tarea.isSuccessful) {
+                                            mensajeLavado = "✅ Lavado guardado en Firestore para ${sub.vehiculo.placa}."
+                                            suscripcionSeleccionadaId = ""
+                                        } else {
+                                            mensajeLavado = "No se pudo guardar el lavado. Revisa la conexión y el rol administrador."
+                                        }
+                                    }
                                 }
                             },
+                            enabled = !guardando && registros != null,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Marcar Servicio de Lavado Realizado")
+                            Text(if (guardando) "Guardando…" else "Marcar Servicio de Lavado Realizado")
                         }
                     }
                 }
@@ -1641,20 +1606,22 @@ private fun PantallaHistorial(
         Spacer(Modifier.height(8.dp))
 
         Text(
-            text = "Historial de Servicios de Lavado (${historialLavados.size})",
+            text = "Historial de Servicios de Lavado (${registros?.size ?: "…"})",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold
         )
 
-        val misLavados = if (esAdministrador) historialLavados else {
-            val misPlacas = gestorVehiculos.obtenerVehiculosPorCliente(clienteId ?: -1).map { it.placa }
-            historialLavados.filter { it.vehiculoPlaca in misPlacas }
-        }
-
-        if (misLavados.isEmpty()) {
+        val error = errorConsulta
+        if (error != null) {
+            Text(error, color = MaterialTheme.colorScheme.error)
+            TextButton(onClick = { intentoConsulta++ }) { Text("Reintentar") }
+        } else if (registros == null) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text("Consultando Firestore…")
+        } else if (historialLavados.isEmpty()) {
             Text("Aún no hay lavados registrados en el historial.")
         } else {
-            misLavados.forEach { registro ->
+            historialLavados.forEach { registro ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(
                         modifier = Modifier.padding(16.dp),
@@ -1665,12 +1632,12 @@ private fun PantallaHistorial(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Lavado #${registro.id} - Placa: ${registro.vehiculoPlaca}",
+                                text = "Lavado #${registro.id.take(8)} - Placa: ${registro.vehiculoPlaca}",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = registro.fechaHora,
+                                text = formatoFechaHora.format(registro.fechaHora.toDate().toInstant()),
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
