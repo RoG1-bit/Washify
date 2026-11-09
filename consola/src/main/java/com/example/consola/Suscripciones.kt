@@ -18,14 +18,25 @@ class Suscripcion(
     var fechaFin: LocalDate,
     var estado: EstadoSuscripcion = EstadoSuscripcion.ACTIVA
 ) {
-  fun actualizarEstado(hoy: LocalDate = LocalDate.now()): Boolean {
-        val nuevoEstado = if (hoy.isBefore(fechaFin)) EstadoSuscripcion.ACTIVA else EstadoSuscripcion.VENCIDA
-        val cambio = nuevoEstado != estado
-        estado = nuevoEstado
-if (cambio && nuevoEstado == EstadoSuscripcion.VENCIDA && vehiculo.plan === plan) {
-            vehiculo.plan = null
+    fun actualizarEstado(hoy: LocalDate = LocalDate.now()): Boolean {
+
+        // Una suscripción vencida o cancelada no se reactiva automáticamente.
+        if (estado == EstadoSuscripcion.VENCIDA) {
+            return false
         }
-        return cambio
+
+        // Solamente las suscripciones activas pueden vencer por fecha.
+        if (!hoy.isBefore(fechaFin)) {
+            estado = EstadoSuscripcion.VENCIDA
+
+            if (vehiculo.plan === plan) {
+                vehiculo.plan = null
+            }
+
+            return true
+        }
+
+        return false
     }
 
     override fun toString(): String =
@@ -120,6 +131,7 @@ class GestorSuscripciones(
             suscripcion.fechaInicio = hoy
             suscripcion.fechaFin = hoy.plusMonths(meses.toLong())
         }
+        suscripcion.estado = EstadoSuscripcion.ACTIVA
         suscripcion.actualizarEstado(hoy)
         suscripcion.vehiculo.plan = suscripcion.plan
 
@@ -145,6 +157,30 @@ fun obtenerActivaDeVehiculo(idVehiculo: Int): Suscripcion? {
         sub.vehiculo.plan = null
         return true
     }
+
+    fun sincronizarSuscripciones(suscripcionesFirestore: List<Suscripcion>) {
+
+        listaSuscripciones.clear()
+        listaSuscripciones.addAll(suscripcionesFirestore)
+
+        contadorId = (listaSuscripciones.maxOfOrNull { it.id } ?: 0) + 1
+
+        //  quitamos los planes de los vehículos relacionados.
+        listaSuscripciones
+            .map { it.vehiculo }
+            .distinctBy { it.id }
+            .forEach { it.plan = null }
+
+        // respetamos el estado que viene directamente de Firestore.
+        listaSuscripciones.forEach { suscripcion ->
+
+            if (suscripcion.estado == EstadoSuscripcion.ACTIVA) {
+                suscripcion.vehiculo.plan = suscripcion.plan
+            }
+        }
+    }
+
+
 
     /** Para Integrante 5 (reportes): copia de solo lectura de todas las suscripciones. */
     fun obtenerTodas(): List<Suscripcion> {

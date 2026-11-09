@@ -121,4 +121,11 @@ class GestorVehiculos {
         return listaVehiculos.filter { it.clienteId == clienteId }
     }
     fun obtenerTodos(): List<Vehiculo> = listaVehiculos.toList()
+
+    fun sincronizarVehiculos(vehiculosFirestore: List<Vehiculo>) {
+        listaVehiculos.clear()
+        listaVehiculos.addAll(vehiculosFirestore)
+
+        contadorId = (listaVehiculos.maxOfOrNull { it.id } ?: 0) + 1
+    }
 }

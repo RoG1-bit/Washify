@@ -11,6 +11,17 @@ service cloud.firestore {
         get(/databases/$(database)/documents/administradores/$(request.auth.uid)).data.activo == true;
     }
 
+    // El reporte administrativo lista fichas de distintas cuentas para registrar lavados.
+    match /{path=**}/clientes/{clienteId} {
+      allow list: if administraHistorial();
+    }
+    match /{path=**}/vehiculos/{vehiculoId} {
+      allow list: if administraHistorial();
+    }
+    match /{path=**}/suscripciones/{suscripcionId} {
+      allow list: if administraHistorial();
+    }
+
     match /lavados/{lavadoId} {
       allow read: if request.auth != null &&
         (resource.data.clienteUid == request.auth.uid || administraHistorial());
