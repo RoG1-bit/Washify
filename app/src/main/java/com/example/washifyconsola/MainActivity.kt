@@ -34,6 +34,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 
 private enum class Rol {
     CLIENTE,
@@ -83,6 +85,7 @@ fun WashifyApp() {
     var confirmPassword by remember { mutableStateOf("") }
     var mensaje by remember { mutableStateOf("") }
     var mostrarPassword by remember { mutableStateOf(false) }
+    var autenticando by remember { mutableStateOf(false) }
 
     // Session States
     var nombreActual by remember { mutableStateOf("") }
@@ -90,53 +93,75 @@ fun WashifyApp() {
     var rolActual by remember { mutableStateOf<Rol?>(null) }
     var clienteIdActual by remember { mutableStateOf<Int?>(null) }
     var uidActual by remember { mutableStateOf<String?>(null) }
+    var clientesIniciales by remember { mutableStateOf(emptyList<Cliente>()) }
 
-    // Repositories / Handlers
-    val gestorClientes = remember { GestorClientes() }
-    val gestorVehiculos = remember { GestorVehiculos() }
-    val clientes = remember { mutableStateListOf<Cliente>() }
-    
-    val gestorSuscripciones = remember { 
+    val repositorio = remember { FirestoreRepository() }
+    val gestorClientes = remember(uidActual) {
+        GestorClientes().apply { sincronizarClientes(clientesIniciales) }
+    }
+    val gestorVehiculos = remember(uidActual) { GestorVehiculos() }
+    val clientes = remember(uidActual) { mutableStateListOf<Cliente>() }
+    val gestorSuscripciones = remember(gestorClientes, gestorVehiculos) {
         GestorSuscripciones(
             buscarCliente = { id -> gestorClientes.obtenerClientes().find { it.id == id } },
             buscarVehiculo = { id -> gestorVehiculos.obtenerTodos().find { it.id == id } }
         )
     }
 
+    fun fallarAcceso(error: String) {
+        auth.signOut()
+        autenticando = false
+        mensaje = error
+    }
+
     fun procesarLoginExitoso(usuario: FirebaseUser) {
         val correo = usuario.email
         if (correo.isNullOrBlank()) {
-            auth.signOut()
-            mensaje = "La cuenta debe tener un correo electrónico."
+            fallarAcceso("La cuenta debe tener un correo electrónico.")
             return
         }
 
+        val uid = usuario.uid
         val nombreFirebase = usuario.displayName?.takeIf { it.isNotBlank() } ?: correo.substringBefore('@')
-        correoActual = correo
-        nombreActual = nombreFirebase
-        uidActual = usuario.uid
         val esAdminUser = correo.equals("admin.washify@example.com", ignoreCase = true)
-        rolActual = if (esAdminUser) Rol.ADMINISTRADOR else Rol.CLIENTE
-        mensaje = ""
 
-        if (!esAdminUser) {
-            val clientesRegistrados = gestorClientes.obtenerClientes()
-            var cliente = clientesRegistrados.find { it.firebaseUid == usuario.uid }
-                ?: clientesRegistrados.find {
-                    usuario.isEmailVerified && it.firebaseUid == null &&
-                        it.correo.equals(correo, ignoreCase = true)
-                }?.apply { firebaseUid = usuario.uid }
-            if (cliente == null) {
-                gestorClientes.registrarCliente(nombreFirebase, correo, usuario.uid)
-                cliente = gestorClientes.obtenerClientes().find { it.firebaseUid == usuario.uid }
-            }
+        fun entrar(lista: List<Cliente>, cliente: Cliente?) {
+            if (auth.currentUser?.uid != uid) return
+            clientesIniciales = lista
             clienteIdActual = cliente?.id
             nombreActual = cliente?.nombre ?: nombreFirebase
-        } else {
-            clienteIdActual = null
+            correoActual = correo
+            rolActual = if (esAdminUser) Rol.ADMINISTRADOR else Rol.CLIENTE
+            uidActual = uid
+            mensaje = ""
+            autenticando = false
+            pantalla = if (esAdminUser) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
         }
 
-        pantalla = if (esAdminUser) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
+        repositorio.obtenerClientes(
+            uid,
+            onSuccess = { lista ->
+                if (esAdminUser) {
+                    entrar(lista, null)
+                } else {
+                    val anterior = lista.find { it.firebaseUid == uid }
+                        ?: lista.find { it.correo.equals(correo, ignoreCase = true) }
+                    if (anterior?.firebaseUid == uid) {
+                        entrar(lista, anterior)
+                    } else {
+                        val cliente = anterior?.copy(firebaseUid = uid)
+                            ?: Cliente((lista.maxOfOrNull { it.id } ?: 0) + 1, nombreFirebase, correo, uid)
+                        repositorio.guardarCliente(
+                            uid,
+                            cliente,
+                            onSuccess = { entrar(lista.filterNot { it.id == cliente.id } + cliente, cliente) },
+                            onError = { fallarAcceso("No se pudo guardar el perfil: $it") }
+                        )
+                    }
+                }
+            },
+            onError = { fallarAcceso("No se pudo consultar el perfil: $it") }
+        )
     }
 
     val googleSignInLauncher = rememberLauncherForActivityResult(
@@ -145,13 +170,13 @@ fun WashifyApp() {
         val account = try {
             GoogleSignIn.getSignedInAccountFromIntent(result.data).getResult(ApiException::class.java)
         } catch (e: ApiException) {
-            mensaje = "No se completó el acceso con Google (código ${e.statusCode})."
+            fallarAcceso("No se completó el acceso con Google (código ${e.statusCode}).")
             return@rememberLauncherForActivityResult
         }
 
         val idToken = account?.idToken
         if (idToken.isNullOrBlank()) {
-            mensaje = "Google no devolvió un token de acceso para Firebase."
+            fallarAcceso("Google no devolvió un token de acceso para Firebase.")
             return@rememberLauncherForActivityResult
         }
 
@@ -161,12 +186,13 @@ fun WashifyApp() {
             if (usuario != null) {
                 procesarLoginExitoso(usuario)
             } else {
-                mensaje = "Firebase no pudo iniciar sesión con Google. Inténtalo nuevamente."
+                fallarAcceso("Firebase no pudo iniciar sesión con Google. Inténtalo nuevamente.")
             }
         }
     }
 
     fun iniciarGoogleSignIn() {
+        if (autenticando) return
         try {
             val idRecurso = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
             if (idRecurso == 0) {
@@ -179,20 +205,13 @@ fun WashifyApp() {
                 .requestIdToken(context.getString(idRecurso))
                 .build()
             val googleSignInClient = GoogleSignIn.getClient(context, opciones)
+            autenticando = true
+            mensaje = ""
             googleSignInClient.signOut().addOnCompleteListener {
                 googleSignInLauncher.launch(googleSignInClient.signInIntent)
             }
         } catch (e: Exception) {
-            mensaje = "Error al abrir ventana de Google: ${e.localizedMessage}"
-        }
-    }
-
-    // Pre-populate Demo Client
-    LaunchedEffect(Unit) {
-        if (gestorClientes.obtenerClientes().isEmpty()) {
-            gestorClientes.registrarCliente("Juan Pérez", "juan@washify.com")
-            val cliente = gestorClientes.obtenerClientes().first()
-            gestorVehiculos.registrarVehiculo("P123-456", "Toyota", "Corolla", cliente.id)
+            fallarAcceso("Error al abrir ventana de Google: ${e.localizedMessage}")
         }
     }
 
@@ -204,10 +223,12 @@ fun WashifyApp() {
         correoActual = ""
         rolActual = null
         clienteIdActual = null
+        clientesIniciales = emptyList()
         uidActual = null
         email = ""
         password = ""
         confirmPassword = ""
+        autenticando = false
         mensaje = ""
         pantalla = Pantalla.LOGIN
     }
@@ -334,25 +355,29 @@ fun WashifyApp() {
                                     return@Button
                                 }
 
+                                autenticando = true
+                                mensaje = ""
                                 auth.signInWithEmailAndPassword(correoIngresado, password)
                                     .addOnCompleteListener { task ->
                                         val usuario = if (task.isSuccessful) task.result?.user else null
                                         if (usuario != null) {
                                             procesarLoginExitoso(usuario)
                                         } else {
-                                            mensaje = "No se pudo iniciar sesión. Verifica tus datos e inténtalo nuevamente."
+                                            fallarAcceso("No se pudo iniciar sesión. Verifica tus datos e inténtalo nuevamente.")
                                         }
                                     }
                             },
+                            enabled = !autenticando,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Iniciar sesión", fontSize = 16.sp)
+                            Text(if (autenticando) "Conectando…" else "Iniciar sesión", fontSize = 16.sp)
                         }
 
                         OutlinedButton(
                             onClick = {
                                 iniciarGoogleSignIn()
                             },
+                            enabled = !autenticando,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("🌐 Continuar con Google")
@@ -366,7 +391,8 @@ fun WashifyApp() {
                                 confirmPassword = ""
                                 mensaje = ""
                                 pantalla = Pantalla.REGISTRO
-                            }
+                            },
+                            enabled = !autenticando
                         ) {
                             Text("¿No tienes cuenta? Regístrate aquí")
                         }
@@ -455,34 +481,46 @@ fun WashifyApp() {
                                         mensaje = "Las contraseñas no coinciden."
                                     }
                                     else -> {
+                                        autenticando = true
+                                        mensaje = ""
                                         auth.createUserWithEmailAndPassword(correo, password)
                                             .addOnCompleteListener { task ->
                                                 val usuario = if (task.isSuccessful) task.result?.user else null
                                                 if (usuario != null) {
-                                                    gestorClientes.registrarCliente(nombreIngresado, correo, usuario.uid)
-                                                    auth.signOut()
-                                                    nombre = ""
-                                                    email = correo
-                                                    password = ""
-                                                    confirmPassword = ""
-                                                    mensaje = "¡Cuenta creada con éxito! Ya puedes iniciar sesión."
-                                                    pantalla = Pantalla.LOGIN
+                                                    fun volverAlAcceso(resultado: String) {
+                                                        auth.signOut()
+                                                        autenticando = false
+                                                        nombre = ""
+                                                        email = correo
+                                                        password = ""
+                                                        confirmPassword = ""
+                                                        mensaje = resultado
+                                                        pantalla = Pantalla.LOGIN
+                                                    }
+                                                    repositorio.guardarCliente(
+                                                        usuario.uid,
+                                                        Cliente(1, nombreIngresado, correo, usuario.uid),
+                                                        onSuccess = { volverAlAcceso("¡Cuenta creada con éxito! Ya puedes iniciar sesión.") },
+                                                        onError = { volverAlAcceso("Cuenta creada. Inicia sesión para completar el perfil.") }
+                                                    )
                                                 } else {
-                                                    mensaje = "Error al crear cuenta: ${task.exception?.localizedMessage}"
+                                                    fallarAcceso("Error al crear cuenta: ${task.exception?.localizedMessage}")
                                                 }
                                             }
                                     }
                                 }
                             },
+                            enabled = !autenticando,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Text("Registrarme")
+                            Text(if (autenticando) "Conectando…" else "Registrarme")
                         }
 
                         OutlinedButton(
                             onClick = {
                                 iniciarGoogleSignIn()
                             },
+                            enabled = !autenticando,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("🌐 Registrarme con Google")
@@ -493,6 +531,7 @@ fun WashifyApp() {
                                 mensaje = ""
                                 pantalla = Pantalla.LOGIN
                             },
+                            enabled = !autenticando,
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Volver al Inicio de Sesión")
@@ -628,6 +667,7 @@ fun WashifyApp() {
                 PantallaClientes(
                     gestor = gestorClientes,
                     clientes = clientes,
+                    uid = uidActual,
                     onVolver = {
                         pantalla = Pantalla.INICIO_ADMIN
                     }
@@ -650,6 +690,7 @@ fun WashifyApp() {
                     clienteId = clienteIdActual,
                     esAdministrador = esAdmin,
                     clientes = gestorClientes.obtenerClientes(),
+                    uid = uidActual,
                     onVolver = {
                         pantalla = if (esAdmin) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
                     }
@@ -692,6 +733,7 @@ fun WashifyApp() {
                     gestorClientes = gestorClientes,
                     clienteId = clienteIdActual,
                     esAdministrador = esAdmin,
+                    uid = uidActual,
                     onVolver = {
                         pantalla = if (esAdmin) Pantalla.INICIO_ADMIN else Pantalla.INICIO_CLIENTE
                     }
@@ -710,9 +752,6 @@ fun WashifyApp() {
                 HeaderBar(titulo = "Historial & Servicios")
 
                 PantallaHistorial(
-                    gestorSuscripciones = gestorSuscripciones,
-                    gestorClientes = gestorClientes,
-                    gestorVehiculos = gestorVehiculos,
                     uid = uidActual,
                     esAdministrador = esAdmin,
                     onVolver = {
@@ -776,28 +815,64 @@ private fun PantallaVehiculos(
     clienteId: Int?,
     esAdministrador: Boolean,
     clientes: List<Cliente>,
+    uid: String?,
     onVolver: () -> Unit
 ) {
     var placa by remember { mutableStateOf("") }
     var marca by remember { mutableStateOf("") }
     var modelo by remember { mutableStateOf("") }
+    var mostrarConfirmacionEliminar by remember { mutableStateOf(false) }
+    var vehiculoPendienteEliminar by remember { mutableStateOf<Vehiculo?>(null) }
     var clienteIdTexto by remember { mutableStateOf("") }
     var busqueda by remember { mutableStateOf("") }
     var mensaje by remember { mutableStateOf("") }
+    var listaCargada by remember { mutableStateOf(false) }
+    var guardando by remember { mutableStateOf(false) }
 
     val vehiculos = remember { mutableStateListOf<Vehiculo>() }
+    val firestoreRepository = remember { FirestoreRepository() }
 
     fun actualizarLista() {
-        vehiculos.clear()
-        val lista = if (esAdministrador) {
-            gestor.obtenerTodos()
+        listaCargada = false
+        if (uid != null) {
+            firestoreRepository.obtenerVehiculos(
+                uid = uid,
+                onSuccess = { lista ->
+                    gestor.sincronizarVehiculos(lista)
+
+                    vehiculos.clear()
+
+                    val listaFiltrada = if (esAdministrador) {
+                        lista
+                    } else {
+                        lista.filter { it.clienteId == clienteId }
+                    }
+
+                    vehiculos.addAll(listaFiltrada)
+                    listaCargada = true
+                },
+                onError = { error ->
+                    mensaje = "Error al consultar vehículos: $error"
+                }
+            )
         } else {
-            clienteId?.let { gestor.obtenerVehiculosPorCliente(it) } ?: emptyList()
+            // Mantiene el funcionamiento de las cuentas locales de prueba.
+            vehiculos.clear()
+
+            val lista = if (esAdministrador) {
+                gestor.obtenerTodos()
+            } else {
+                clienteId?.let {
+                    gestor.obtenerVehiculosPorCliente(it)
+                } ?: emptyList()
+            }
+
+            vehiculos.addAll(lista)
+            listaCargada = true
         }
-        vehiculos.addAll(lista)
     }
 
-    LaunchedEffect(clienteId, esAdministrador) {
+    LaunchedEffect(uid, clienteId, esAdministrador) {
         actualizarLista()
     }
 
@@ -857,6 +932,7 @@ private fun PantallaVehiculos(
             }
 
             Button(
+                enabled = listaCargada && !guardando,
                 onClick = {
                     val propietarioId = if (esAdministrador) clienteIdTexto.toIntOrNull() else clienteId
                     val placaLimpia = placa.trim()
@@ -884,12 +960,42 @@ private fun PantallaVehiculos(
                             )
 
                             if (registrado) {
-                                actualizarLista()
-                                placa = ""
-                                marca = ""
-                                modelo = ""
-                                clienteIdTexto = ""
-                                mensaje = "✅ Vehículo registrado correctamente."
+                                val vehiculoRegistrado = gestor.obtenerTodos()
+                                    .find { it.placa.equals(placaLimpia, ignoreCase = true) }
+
+                                if (uid != null && vehiculoRegistrado != null) {
+                                    guardando = true
+                                    firestoreRepository.guardarVehiculo(
+                                        uid = uid,
+                                        vehiculo = vehiculoRegistrado,
+                                        onSuccess = {
+                                            guardando = false
+                                            placa = ""
+                                            marca = ""
+                                            modelo = ""
+                                            clienteIdTexto = ""
+                                            actualizarLista()
+                                            mensaje = "✅ Vehículo guardado en Firestore."
+                                        },
+                                        onError = { error ->
+                                            gestor.eliminarVehiculo(vehiculoRegistrado.id)
+                                            guardando = false
+                                            mensaje = "ERROR FIRESTORE: $error"
+                                            actualizarLista()
+                                        }
+                                    )
+                                } else {
+                                    actualizarLista()
+                                    mensaje = if (uid == null) {
+                                        "✅ Vehículo registrado localmente. Inicia sesión con Firebase para sincronizarlo."
+                                    } else {
+                                        "⚠️ No se pudo recuperar el vehículo registrado."
+                                    }
+                                    placa = ""
+                                    marca = ""
+                                    modelo = ""
+                                    clienteIdTexto = ""
+                                }
                             } else {
                                 mensaje = "Ya existe un vehículo registrado con esa placa."
                             }
@@ -898,7 +1004,7 @@ private fun PantallaVehiculos(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Registrar Vehículo")
+                Text(if (guardando) "Guardando…" else "Registrar Vehículo")
             }
         }
     }
@@ -965,11 +1071,12 @@ private fun PantallaVehiculos(
 
                     OutlinedButton(
                         onClick = {
-                            gestor.eliminarVehiculo(vehiculo.id)
-                            actualizarLista()
-                            mensaje = "✅ Vehículo con placa ${vehiculo.placa} eliminado."
+                            vehiculoPendienteEliminar = vehiculo
+                            mostrarConfirmacionEliminar = true
                         },
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        )
                     ) {
                         Text("Eliminar Vehículo")
                     }
@@ -985,18 +1092,94 @@ private fun PantallaVehiculos(
     ) {
         Text("← Volver al Menú Principal")
     }
+    if (mostrarConfirmacionEliminar) {
+        AlertDialog(
+            onDismissRequest = {
+                mostrarConfirmacionEliminar = false
+                vehiculoPendienteEliminar = null
+            },
+            title = {
+                Text("Confirmar eliminación")
+            },
+            text = {
+                Text(
+                    "¿Estás seguro de que deseas eliminar el vehículo " +
+                            "${vehiculoPendienteEliminar?.placa}? Esta acción no se puede deshacer."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val vehiculo = vehiculoPendienteEliminar
+
+                        if (vehiculo != null && uid != null) {
+                            firestoreRepository.eliminarVehiculo(
+                                uid = uid,
+                                vehiculoId = vehiculo.id,
+                                onSuccess = {
+                                    gestor.eliminarVehiculo(vehiculo.id)
+                                    actualizarLista()
+                                    mensaje = "✅ Vehículo eliminado correctamente."
+                                },
+                                onError = { error ->
+                                    mensaje = "Error al eliminar: $error"
+                                }
+                            )
+                        } else {
+                            mensaje = "No hay una sesión Firebase activa."
+                        }
+
+                        mostrarConfirmacionEliminar = false
+                        vehiculoPendienteEliminar = null
+                    }
+                ) {
+                    Text("Sí, eliminar")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        mostrarConfirmacionEliminar = false
+                        vehiculoPendienteEliminar = null
+                    }
+                ) {
+                    Text("Cancelar")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 private fun PantallaClientes(
     gestor: GestorClientes,
     clientes: MutableList<Cliente>,
+    uid: String?,
     onVolver: () -> Unit
 ) {
     var nombreCliente by remember { mutableStateOf("") }
     var correoCliente by remember { mutableStateOf("") }
     var busqueda by remember { mutableStateOf("") }
     var mensaje by remember { mutableStateOf("") }
+    val firestoreRepository = remember { FirestoreRepository() }
+
+    LaunchedEffect(uid) {
+        if (uid != null) {
+            firestoreRepository.obtenerClientes(
+                uid = uid,
+                onSuccess = { lista ->
+                    gestor.sincronizarClientes(lista)
+
+                    clientes.clear()
+                    clientes.addAll(lista)
+                },
+                onError = { error ->
+                    mensaje = "Error al cargar clientes: $error"
+                }
+            )
+        }
+    }
+
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(
@@ -1042,12 +1225,34 @@ private fun PantallaClientes(
                         mensaje = "Ingresa un correo electrónico válido."
                     } else {
                         val exito = gestor.registrarCliente(nom, corr)
+
                         if (exito) {
-                            clientes.clear()
-                            clientes.addAll(gestor.obtenerClientes())
-                            nombreCliente = ""
-                            correoCliente = ""
-                            mensaje = "✅ Cliente registrado exitosamente."
+
+                            val nuevoCliente = gestor.obtenerClientes().last()
+
+                            if (uid != null) {
+
+                                firestoreRepository.guardarCliente(
+                                    uid = uid,
+                                    cliente = nuevoCliente,
+                                    onSuccess = {
+                                        clientes.clear()
+                                        clientes.addAll(gestor.obtenerClientes())
+
+                                        nombreCliente = ""
+                                        correoCliente = ""
+
+                                        mensaje = "✅ Cliente guardado correctamente en Firebase."
+                                    },
+                                    onError = { error ->
+                                        mensaje = "Error al guardar cliente: $error"
+                                    }
+                                )
+
+                            } else {
+                                mensaje = "No hay una sesión autenticada para guardar el cliente."
+                            }
+
                         } else {
                             mensaje = "Ese correo ya pertenece a otro cliente."
                         }
@@ -1175,8 +1380,10 @@ private fun PantallaSuscripciones(
     gestorClientes: GestorClientes,
     clienteId: Int?,
     esAdministrador: Boolean,
+    uid: String?,
     onVolver: () -> Unit
 ) {
+    val firestoreRepository = remember { FirestoreRepository() }
     val suscripciones = remember { mutableStateListOf<Suscripcion>() }
     var idClienteAsignar by remember { mutableStateOf("") }
     var idVehiculoAsignar by remember { mutableStateOf("") }
@@ -1185,21 +1392,93 @@ private fun PantallaSuscripciones(
     var metodoPago by remember { mutableStateOf("Tarjeta de Crédito / Débito") }
     var busqueda by remember { mutableStateOf("") }
     var mensaje by remember { mutableStateOf("") }
+    var listaCargada by remember { mutableStateOf(false) }
+    var guardando by remember { mutableStateOf(false) }
 
     fun actualizarLista() {
-        suscripciones.clear()
-        gestorSuscripciones.actualizarEstados()
-        val lista = if (esAdministrador) {
-            gestorSuscripciones.obtenerTodas()
-        } else {
-            clienteId?.let { id ->
-                gestorSuscripciones.obtenerTodas().filter { it.cliente.id == id }
-            } ?: emptyList()
+        listaCargada = false
+        if (uid == null) {
+            // Mantener el funcionamiento de las cuentas locales de prueba.
+            suscripciones.clear()
+            gestorSuscripciones.actualizarEstados()
+
+            val lista = if (esAdministrador) {
+                gestorSuscripciones.obtenerTodas()
+            } else {
+                clienteId?.let { id ->
+                    gestorSuscripciones.obtenerTodas().filter {
+                        it.cliente.id == id
+                    }
+                } ?: emptyList()
+            }
+
+            suscripciones.addAll(lista)
+            listaCargada = true
+            return
         }
-        suscripciones.addAll(lista)
+
+        // 1. Recuperar clientes de Firestore.
+        firestoreRepository.obtenerClientes(
+            uid = uid,
+            onSuccess = { listaClientes ->
+                gestorClientes.sincronizarClientes(listaClientes)
+
+                // 2. Recuperar vehículos de Firestore.
+                firestoreRepository.obtenerVehiculos(
+                    uid = uid,
+                    onSuccess = { listaVehiculos ->
+
+                        gestorVehiculos.sincronizarVehiculos(listaVehiculos)
+
+                        // 3. Recuperar suscripciones de Firestore.
+                        firestoreRepository.obtenerSuscripciones(
+                            uid = uid,
+                            buscarCliente = { id ->
+                                gestorClientes.obtenerClientes().find {
+                                    it.id == id
+                                }
+                            },
+                            buscarVehiculo = { id ->
+                                gestorVehiculos.obtenerTodos().find {
+                                    it.id == id
+                                }
+                            },
+                            onSuccess = { listaSuscripciones ->
+
+                                gestorSuscripciones.sincronizarSuscripciones(
+                                    listaSuscripciones
+                                )
+
+                                suscripciones.clear()
+
+                                val listaFiltrada = if (esAdministrador) {
+                                    listaSuscripciones
+                                } else {
+                                    listaSuscripciones.filter {
+                                        it.cliente.id == clienteId
+                                    }
+                                }
+
+                                suscripciones.addAll(listaFiltrada)
+                                listaCargada = true
+                            },
+                            onError = { error ->
+                                mensaje = "Error al consultar suscripciones: $error"
+                            }
+                        )
+                    },
+                    onError = { error ->
+                        mensaje = "Error al consultar vehículos: $error"
+                    }
+                )
+            },
+            onError = { error ->
+                mensaje = "Error al consultar clientes: $error"
+            }
+        )
     }
 
-    LaunchedEffect(clienteId, esAdministrador) {
+    LaunchedEffect(uid, clienteId, esAdministrador) {
         actualizarLista()
     }
 
@@ -1284,6 +1563,7 @@ private fun PantallaSuscripciones(
             }
 
             Button(
+                enabled = listaCargada && !guardando,
                 onClick = {
                     val vehId = idVehiculoAsignar.toIntOrNull()
                     val cliId = if (esAdministrador) idClienteAsignar.toIntOrNull() else clienteId
@@ -1304,12 +1584,37 @@ private fun PantallaSuscripciones(
                                 else -> {
                                     val exito = gestorSuscripciones.crearSuscripcion(cliId, vehId, plan, mesesDuracion)
                                     if (exito) {
-                                        mensaje = "✅ ¡Suscripción activada con éxito vía $metodoPago!"
-                                        actualizarLista()
-                                        idVehiculoAsignar = ""
-                                        idClienteAsignar = ""
+
+                                        val suscripcion = gestorSuscripciones.obtenerActivaDeVehiculo(vehId)
+
+                                        if (uid != null && suscripcion != null) {
+                                            guardando = true
+                                            firestoreRepository.guardarSuscripcion(
+                                                uid = uid,
+                                                suscripcion = suscripcion,
+                                                metodoPago = metodoPago,
+                                                onSuccess = {
+                                                    guardando = false
+                                                    mensaje = "✅ ¡Suscripción guardada correctamente!"
+                                                    actualizarLista()
+                                                    idVehiculoAsignar = ""
+                                                    idClienteAsignar = ""
+                                                },
+                                                onError = { error: Exception ->
+                                                    gestorSuscripciones.eliminarSuscripcion(suscripcion.id)
+                                                    guardando = false
+                                                    mensaje = "Error al guardar: ${error.localizedMessage}"
+                                                    actualizarLista()
+                                                }
+                                            )
+
+                                        } else {
+                                            mensaje = "Suscripción creada localmente, pero no se guardó en Firebase."
+                                            actualizarLista()
+                                        }
+
                                     } else {
-                                        mensaje = "No se pudo crear la suscripción. Verifica las fechas."
+                                        mensaje = "No se pudo activar la suscripción. Verifica los datos."
                                     }
                                 }
                             }
@@ -1318,7 +1623,7 @@ private fun PantallaSuscripciones(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Confirmar y Contratar Suscripción")
+                Text(if (guardando) "Guardando…" else "Confirmar y Contratar Suscripción")
             }
         }
     }
@@ -1389,32 +1694,106 @@ private fun PantallaSuscripciones(
                         modifier = Modifier.padding(top = 8.dp)
                     ) {
                         Button(
+                            enabled = listaCargada && !guardando,
                             onClick = {
-                                val renovado = gestorSuscripciones.renovarSuscripcion(sub.id, 1)
-                                if (renovado) {
-                                    mensaje = "✅ Suscripción #${sub.id} renovada +1 mes."
-                                    actualizarLista()
-                                } else {
+                                if (!gestorSuscripciones.renovarSuscripcion(sub.id, 1)) {
                                     mensaje = "No se pudo renovar la suscripción."
+                                    return@Button
                                 }
+                                val renovada = gestorSuscripciones.obtenerActivaDeVehiculo(sub.vehiculo.id)
+                                if (uid == null || renovada == null) {
+                                    actualizarLista()
+                                    return@Button
+                                }
+                                guardando = true
+                                firestoreRepository.actualizarVigencia(
+                                    uid,
+                                    renovada,
+                                    onSuccess = {
+                                        guardando = false
+                                        mensaje = "✅ Suscripción #${sub.id} renovada +1 mes."
+                                        actualizarLista()
+                                    },
+                                    onError = { error ->
+                                        guardando = false
+                                        mensaje = "Error al renovar: $error"
+                                        actualizarLista()
+                                    }
+                                )
                             },
                             modifier = Modifier.weight(1f)
                         ) {
                             Text("Renovar (+1 Mes)")
                         }
 
-                        OutlinedButton(
-                            onClick = {
-                                val eliminado = gestorSuscripciones.eliminarSuscripcion(sub.id)
-                                if (eliminado) {
-                                    mensaje = "✅ Suscripción #${sub.id} eliminada."
-                                    actualizarLista()
-                                } else {
-                                    mensaje = "No se pudo eliminar la suscripción."
+                        if (sub.estado == EstadoSuscripcion.ACTIVA) {
+                            OutlinedButton(
+                                enabled = listaCargada && !guardando,
+                                onClick = {
+                                    val uidUsuario = uid
+
+                                    if (uidUsuario.isNullOrBlank()) {
+                                        mensaje = "No existe un usuario autenticado."
+                                    } else {
+                                        firestoreRepository.cancelarSuscripcion(
+                                            uid = uidUsuario,
+                                            id = sub.id,
+                                            onSuccess = {
+                                                gestorSuscripciones.cancelarSuscripcion(sub.id)
+
+                                                val indice = suscripciones.indexOfFirst {
+                                                    it.id == sub.id
+                                                }
+
+                                                if (indice != -1) {
+                                                    val suscripcionActualizada = Suscripcion(
+                                                        id = sub.id,
+                                                        cliente = sub.cliente,
+                                                        vehiculo = sub.vehiculo,
+                                                        plan = sub.plan,
+                                                        fechaInicio = sub.fechaInicio,
+                                                        fechaFin = sub.fechaFin,
+                                                        estado = EstadoSuscripcion.VENCIDA
+                                                    )
+
+                                                    suscripciones[indice] = suscripcionActualizada
+                                                }
+
+                                                mensaje = "Suscripción cancelada correctamente."
+                                            },
+                                            onError = { error ->
+                                                mensaje = "Error al cancelar: $error"
+                                            }
+                                        )
+                                    }
                                 }
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Text("Cancelar")
+                            }
+                        }
+
+                        OutlinedButton(
+                            enabled = listaCargada && !guardando,
+                            onClick = {
+                                val uidUsuario = uid
+
+                                if (uidUsuario.isNullOrBlank()) {
+                                    mensaje = "No existe un usuario autenticado."
+                                } else {
+                                    firestoreRepository.eliminarSuscripcion(
+                                        uid = uidUsuario,
+                                        id = sub.id,
+                                        onSuccess = {
+                                            gestorSuscripciones.eliminarSuscripcion(sub.id)
+                                            mensaje = "Suscripción eliminada correctamente."
+                                            actualizarLista()
+                                        },
+                                        onError = { error ->
+                                            mensaje = "Error al eliminar: $error"
+                                        }
+                                    )
+                                }
+                            }
                         ) {
                             Text("Eliminar")
                         }
@@ -1435,9 +1814,6 @@ private fun PantallaSuscripciones(
 
 @Composable
 private fun PantallaHistorial(
-    gestorSuscripciones: GestorSuscripciones,
-    gestorClientes: GestorClientes,
-    gestorVehiculos: GestorVehiculos,
     uid: String?,
     esAdministrador: Boolean,
     onVolver: () -> Unit
@@ -1449,6 +1825,7 @@ private fun PantallaHistorial(
     }
 
     val repositorio = remember { HistorialFirestore() }
+    val datosLavados = remember { FirestoreRepository() }
     val formatoFechaHora = remember {
         DateTimeFormatter.ofPattern("dd-MM-yyyy HH:mm").withZone(ZoneId.systemDefault())
     }
@@ -1476,14 +1853,25 @@ private fun PantallaHistorial(
         onDispose { escucha.remove() }
     }
 
+    var intentoReporte by remember(uid) { mutableIntStateOf(0) }
+    var reporte by remember(uid, intentoReporte) { mutableStateOf<ReporteLavados?>(null) }
+    var errorReporte by remember(uid, intentoReporte) { mutableStateOf<String?>(null) }
+    LaunchedEffect(uid, esAdministrador, intentoReporte) {
+        if (esAdministrador) {
+            datosLavados.obtenerReporteLavados(uid)
+                .addOnSuccessListener { reporte = it }
+                .addOnFailureListener {
+                    errorReporte = "No se pudo cargar el reporte. Verifica la conexión y las reglas de Firestore."
+                }
+        }
+    }
+
     val historialLavados = registros.orEmpty()
-    val clientes = gestorClientes.obtenerClientes()
-    val suscripciones = gestorSuscripciones.obtenerTodas()
-    
+    val suscripciones = reporte?.suscripciones.orEmpty()
     val activas = suscripciones.filter { it.estado == EstadoSuscripcion.ACTIVA }
     val vencidas = suscripciones.filter { it.estado == EstadoSuscripcion.VENCIDA }
 
-    var suscripcionSeleccionadaId by remember(uid) { mutableStateOf("") }
+    var numeroSuscripcion by remember(uid, intentoReporte) { mutableStateOf("") }
     var mensajeLavado by remember(uid) { mutableStateOf("") }
     var guardando by remember(uid) { mutableStateOf(false) }
 
@@ -1504,10 +1892,10 @@ private fun PantallaHistorial(
                         color = MaterialTheme.colorScheme.onSecondaryContainer
                     )
                     Divider()
-                    Text("Total Clientes Registrados: ${clientes.size}")
-                    Text("Total Vehículos Registrados: ${gestorVehiculos.obtenerTodos().size}")
-                    Text("Suscripciones Activas: ${activas.size}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                    Text("Suscripciones Vencidas: ${vencidas.size}", color = MaterialTheme.colorScheme.error)
+                    Text("Total Clientes Registrados: ${reporte?.totalClientes ?: "…"}")
+                    Text("Total Vehículos Registrados: ${reporte?.totalVehiculos ?: "…"}")
+                    Text("Suscripciones Activas: ${reporte?.let { activas.size } ?: "…"}", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Text("Suscripciones Vencidas: ${reporte?.let { vencidas.size } ?: "…"}", color = MaterialTheme.colorScheme.error)
                     Text("Servicios de Lavado Realizados: ${registros?.size ?: "…"}", fontWeight = FontWeight.Bold)
                 }
             }
@@ -1530,16 +1918,22 @@ private fun PantallaHistorial(
                         style = MaterialTheme.typography.bodySmall
                     )
 
-                    if (activas.isEmpty()) {
+                    val problema = errorReporte
+                    if (problema != null) {
+                        Text(problema, color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = { intentoReporte++ }) { Text("Reintentar reporte") }
+                    } else if (reporte == null) {
+                        Text("Consultando suscripciones en Firestore…")
+                    } else if (activas.isEmpty()) {
                         Text("No hay suscripciones activas en el sistema para registrar lavados.", color = Color.Gray)
                     } else {
-                        activas.forEach { suscripcion ->
-                            Text("#${suscripcion.id} · ${suscripcion.vehiculo.placa} · ${suscripcion.cliente.nombre}")
+                        activas.forEachIndexed { indice, suscripcion ->
+                            Text("${indice + 1} · ${suscripcion.vehiculo.placa} · ${suscripcion.cliente.nombre}")
                         }
                         OutlinedTextField(
-                            value = suscripcionSeleccionadaId,
-                            onValueChange = { suscripcionSeleccionadaId = it },
-                            label = { Text("Ingresa ID de Suscripción Activa") },
+                            value = numeroSuscripcion,
+                            onValueChange = { numeroSuscripcion = it },
+                            label = { Text("Número de la suscripción en la lista") },
                             modifier = Modifier.fillMaxWidth(),
                             enabled = !guardando,
                             singleLine = true,
@@ -1557,11 +1951,12 @@ private fun PantallaHistorial(
                         Button(
                             onClick = {
                                 if (guardando) return@Button
-                                val subId = suscripcionSeleccionadaId.toIntOrNull()
-                                val sub = activas.find { it.id == subId }
+                                val sub = numeroSuscripcion.toIntOrNull()
+                                    ?.takeIf { it > 0 }
+                                    ?.let { activas.getOrNull(it - 1) }
 
-                                if (sub == null) {
-                                    mensajeLavado = "Ingresa un ID de suscripción activa válido."
+                                if (sub == null || sub.actualizarEstado()) {
+                                    mensajeLavado = "Selecciona una suscripción activa de la lista."
                                 } else {
                                     guardando = true
                                     mensajeLavado = ""
@@ -1569,7 +1964,7 @@ private fun PantallaHistorial(
                                         guardando = false
                                         if (tarea.isSuccessful) {
                                             mensajeLavado = "✅ Lavado guardado en Firestore para ${sub.vehiculo.placa}."
-                                            suscripcionSeleccionadaId = ""
+                                            numeroSuscripcion = ""
                                         } else {
                                             mensajeLavado = "No se pudo guardar el lavado. Revisa la conexión y el rol administrador."
                                         }
